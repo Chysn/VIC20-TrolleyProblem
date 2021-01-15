@@ -1,0 +1,9 @@
+#!/bin/bash
+
+xa -l toc -o ./vic/trolley.bin ./src/trolley.asm
+printf "\x01\x10" | cat - ./vic/trolley.bin > ./vic/trolley
+rm vic/trolley.d64
+c1541 -format trolley,8 d64 vic/trolley.d64 -write vic/trolley
+
+cp ./vic/trolley ~/vic20/
+
