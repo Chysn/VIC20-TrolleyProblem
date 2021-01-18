@@ -28,19 +28,32 @@ BASIC:      .byte $0b,$10,$2a,$00,$9e,$34,$31,$31
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Constants - Game Configuration
 SCRCOLVAL   = 142               ; Screen color
-UP          = $01               ; Directional constants
-RIGHT       = $02               ; ,,
-DOWN        = $03               ; ,,
-LEFT        = $04               ; ,,
+NORTH       = $01               ; ,,
+EAST        = $02               ; ,,
+SOUTH       = $03               ; ,,
+WEST        = $04               ; ,,
 FIRE        = $05               ; Joystick fire button pressed
+DEF_SPEED   = 8                 ; Default speed
+MAX_SPEED   = 3                 ; Maximum speed
+MIN_SPEED   = 10                ; Minimum speed
+MAX_PASS    = 4                 ; Maximum passengers on trolley
 
 ; Score constants
-PICKUP      = 20                ; Score when a passenger is picked up
-DROPOFF     = 100               ; Score when a passenger is dropped off
-TIME_BONUS  = 1000              ; Starting time bonus
+PICKUP      = 10                ; Score when a passenger is picked up
+DROPOFF     = 50                ; Score when a passenger is dropped off
 
 ; Character constants
-TRACK_COL   = 1                 ; Track color
+PASS1       = $1b
+SWITCH_OFF  = $1f
+BUILDING    = $22
+DEPOT       = $21
+START_DEPOT = $24
+TROLLEY_WE  = $3a
+TROLLEY_NS  = $3b
+TROLLEY_FW  = $3c               ; Trolley that goes like a slash
+TROLLEY_BK  = $3d               ; Trolley that goes like a backslash
+B_SRC       = $3e               ; Bipmap source character
+B_DEST      = $3f               ; Bipmap destination character
 
 ; System Resources
 CINV        = $0314             ; ISR vector
@@ -49,8 +62,6 @@ NMINV       = $fffe             ; Development NMI non-vector
 SCREEN      = $1e00             ; Screen character memory (unexpanded)
 COLOR       = $9600             ; Screen color memory (unexpanded)
 IRQ         = $eabf             ; System ISR   
-BASRND      = $e094             ; Routine for BASIC's RND() function
-RNDNUM      = $8d               ; Result storage location for RND()
 VICCR5      = $9005             ; Character map register
 VOICEH      = $900c             ; High sound register
 VOICEM      = $900b             ; Mid sound register
@@ -75,15 +86,30 @@ TIME_M      = $a1               ; Jiffy counter middle
 ; Game Memory
 LEVEL       = $f7               ; Level pointer (2 bytes)
 TROLLEY     = $f9               ; Trolley location (2 bytes)
-CURSOR      = $f9               ; [LEVEL DRAW] Track cursor
+CURSOR      = $00               ; [LEVEL DRAW] Track cursor
 SWITCH      = $fb               ; Current switch location (2 bytes)
-UNDER       = $fd               ; Track character under trolley
+UNDER_S     = $fd               ; Track character at trolley source
 COLUMN      = $fd               ; [LEVEL DRAW] Column number
 JOYREG      = $fe               ; Joystick register storage
 TRMASK      = $fe               ; [LEVEL DRAW] Track mask
-SCORE       = $45               ; Score
-HISCORE     = $47               ; High score
+SCORE       = $45               ; Score (2 bytes)
+HISCORE     = $47               ; High score (2 bytes)
 PLAY_FL     = $49               ; Play flag (determines behavior of ISR)
+WAITING     = $02               ; Passengers waiting
+PASS_COUNT  = $03               ; Passenger Count
+DIR         = $04               ; Tolley direction
+TIME        = $05               ; Time remaining (seconds)
+UNDER_D     = $06               ; Character at trolley destination
+ZP_SOURCE   = $61               ; Zero page copy source (2 bytes)
+ZP_DEST     = $63               ; Zerp page copy destination (2 bytes)
+TR_SOURCE   = $0350             ; Trolley-only source bitmap (8 bytes)
+TR_DEST     = $0358             ; Trolley-only destination bitmap (8 bytes)
+TK_SOURCE   = $0360             ; Track-only source bitmap  (8 bytes)
+TK_DEST     = $0368             ; Track-only source bitmap (8 bytes)
+MV_COUNT    = $0370             ; Bitmap movement countdown
+MOVE_FL     = $0371             ; Move flag
+SPEED       = $0372             ; Current speed
+SPEED_COUNT = $0373             ; Speed countdown
 
 ; Sound Memory
 FX_REG      = $033c             ; Current effect frequency register
@@ -127,10 +153,20 @@ Welcome:    clc                 ; Disable the playing flag, in case we get
 ; Start a new game            
 Start:      jsr Wait4Fire
             jsr InitGame        ; Initialize game and draw first level
+            
+NextLevel:  sei
+            jsr InitLevel       ; Initialize Level
+            cli
+            jsr PrepMove
 
 ; Main loop            
-Main:       jsr Joystick        ; Read the joystick
-            bne Main            ; If no movement do nothing
+Main:       bit MOVE_FL         ; If move flag is set, move the trolley
+            bpl read_js         ;   one pixel in the appropriate direction
+            jsr MoveBitmap      ;   ,,
+            jsr BitMerge        ;   ,,
+            lsr MOVE_FL         ; Clear move flag
+read_js:    jsr Joystick        ; Read the joystick
+            beq Main            ; If no movement do nothing
 ch_fire:    cmp #FIRE           ; Has fire been pressed?
             bne handle_dir      ; If not, handle a direction
             jsr TogSwitch       ; If fire is pressed, toggle current switch
@@ -146,19 +182,20 @@ ISR:        bit PLAY_FL         ; If the game is over, don't do anything
             bpl isr_r           ;   in this routine
             jsr FXService       ; Service sound effect
             jsr MusService      ; Service shift register music
+            dec SPEED_COUNT     ; Handle speed countdown for trolley
+            bne isr_r           ; ,, 
+            lda SPEED           ; Reset the speed countdown
+            sta SPEED_COUNT     ; ,,
+            sec                 ; Set the movement flag
+            ror MOVE_FL         ; ,,
 isr_r:      jmp IRQ           
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; GAME MECHANICS
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Toggle Current Switch
-TogSwitch:  rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; SUBROUTINES
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Wait for Fire
-Wait4Fire:  jsr Joystick        ; Wait for fire to be released
+Wait4Fire:  ;jsr Joystick        ; Wait for fire to be released
+            jmp Joystick
             cpx #FIRE           ; ,,
             beq Wait4Fire       ; ,,
 wait_fire:  jsr Joystick        ; Wait for the fire button
@@ -219,11 +256,10 @@ ShowScore:  rts
 
 ; Reset Cursor
 ; To the top of the board
-ResetCur:   lda #$5b            ; Set starting point for level
+ResetCur:   lda #$71            ; Set starting point for level
             sta CURSOR          ; ,,
             lda #>SCREEN        ; ,,
             sta CURSOR+1        ; ,,
-            ldx #$00
             rts
 
 ; Move Cursor
@@ -246,6 +282,55 @@ sign:       tay                 ; ,,
             pla                 ; Restore Y
             tay                 ; ,,
             rts   
+            
+; Place Character
+; In a 16x16 grid, with the coordinates in A
+;   High nybble = Y position
+;   Low nybble = X position
+; And the character code in X            
+PlaceChar:  pha
+            jsr ResetCur
+            pla
+            pha
+            and #$0f            ; Mask for X coordinate
+            clc
+            adc CURSOR
+            sta CURSOR
+            bcc do_x
+            inc CURSOR+1
+do_x:       pla                 ; Shift for Y coordinate
+            lsr                 ; ,,
+            lsr                 ; ,,
+            lsr                 ; ,,
+            lsr                 ; ,,
+            tay                 ; Move downward Y times
+            iny                 ; ,,
+            txa                 ; A is now the character to place
+            pha                 ; ,,
+-loop:      ldx #SOUTH
+            jsr MoveCursor
+            dey
+            bne loop
+            ldx #NORTH          ; Move north once to compensate for the
+            jsr MoveCursor      ;   extra down
+            ldx #$00            ;   and place it in the cursor position
+            lda (CURSOR,x)      ; If the space is occupied, do not
+            cmp #$20            ;   draw anything
+            bne place_r         ;   ,,
+draw_char:  pla                 ; Get the character back and draw it
+            sta (CURSOR,x)      ; ,,
+            pha                 ; Preserve X for caller
+            lda CURSOR+1
+            clc
+            adc #$78
+            sta CURSOR+1
+            pla
+            pha
+            and #$07
+            sta (CURSOR,x);
+place_r:    pla                 ; Restore X for caller
+            tax                 ; ,,
+            rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; SETUP ROUTINES
@@ -285,10 +370,25 @@ InitGame:   lda #<Levels        ; Set the starting level
             ror PLAY_FL         ; ,,
             lda #$18            ; Set volume and aux color
             sta VOLUME          ; ,,
+            rts
+            
+InitLevel:  ldy #$21            ; Get the time for the level
+            lda (LEVEL),y       ;   and set remaining time
+            sta TIME            ;   ,,
+            lda #EAST           ; All levels start out with the
+            sta DIR             ;   trolley moving east
+            lda #$00            ; Clear the trolley
+            sta PASS_COUNT      ; ,,
+            lda #DEF_SPEED      ; Set starting speed
+            sta SPEED           ; ,,
+            sta SPEED_COUNT     ; ,,
+            lda #<ScoreTx       ; Show the top banner
+            ldy #>ScoreTx       ; ,,
+            jsr PRTSTR          ; ,,
             ; Fall through to DrawLevel
 
-DrawLevel:  jsr CLSR            ; Clear screen
-            jsr ResetCur        ; Reset cursor to top left
+DrawLevel:  jsr ResetCur        ; Reset cursor to top left
+            ldx #$00            ; Initialize ZP cursor index
             ldy #$ff            ; Initialize level data index
 next_row:   lda #$02            ; Reset column number
             sta COLUMN          ; ,,
@@ -355,18 +455,304 @@ unoccupied: pla                 ; Get the direction valu back for the shift
             lda TRMASK          ; Once the 4 adjacent cells are examined,
             ora #$20            ;   add a character offset and populate the
             sta (CURSOR,x)      ;   current cell
+            cmp #START_DEPOT    ; Did we place the starting depot?
+            bne next_cell
+            lda CURSOR          ; The trolley's starting position is
+            sta TROLLEY         ;   one row below (22 cells after)
+            lda CURSOR+1        ;   the starting depot
+            sta TROLLEY+1       ;   ,,
+            lda #$16            ;   ,,
+            clc                 ;   ,,
+            adc TROLLEY         ;   ,,
+            sta TROLLEY         ;   ,,
+            bcc next_cell       ;   ,,
+            inc TROLLEY+1       ;   ,,
 next_cell:  inc CURSOR          ; Advance the cursor to the next cell
             bne check_end2      ; ,,
             inc CURSOR+1        ; ,,
 check_end2: lda CURSOR+1        ; Have we reached the end of the screen?
             cmp #$20            ; ,,
             bne loop            ; If more to do, go back for the next cell
+            ldx #$00            ; Set the Under Destination character in
+            lda (TROLLEY,x)     ;   preparation for the first move
+            sta UNDER_D         ;   ,,
             ; Fall through to AddPieces
 
 ; Add Pieces to Board
-; Passengers and Switches
-AddPieces:  rts
+; Switches and Passengers
+AddPieces:  ldy #$22            ; Start adding pieces after track data
+            ldx #SWITCH_OFF     ; First section is switch location data
+-loop:      tya                 ; So we don't need to worry about Y in
+            pha                 ;   PlaceChar
+            lda (LEVEL),y       ; Get piece
+            bne place           ; If the position is 0, change from
+            ldx #PASS1          ;   switches to passengers
+            sta WAITING         ; Reset waiting count
+            bne next_piece
+place:      inc WAITING         ; Count waiting passengers
+            jsr PlaceChar       ; Place character
+next_piece: pla
+            tay
+            iny
+            cpy #$30            ; Reached end of level data
+            bcc loop
+            ; Fall through to CityScape
             
+; Draw Buildings
+; Use some trig constants as pseudorandom coordinates for
+; buildings
+CityScape:  ldy #$20            ; Coordinates of depot
+            ldx #DEPOT
+            lda (LEVEL),y
+            jsr PlaceChar
+            ldx #BUILDING
+            ldy #$21
+-loop:      lda $e2ec,y
+            sty TRMASK
+            adc LEVEL           ; Add the level to mix it up a bit
+            jsr PlaceChar
+            ldy TRMASK
+            dey
+            bne loop
+            rts
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; GAME MECHANICS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Toggle Current Switch
+TogSwitch:  rts
+
+; Check for Passengers
+; adjacent to the trolley
+CheckPass:  rts
+
+CheckDepot: rts
+           
+            
+; Handle New Cell
+; Check for several things upon entering a new cell
+;   * Pick up new passengers
+;   * Drop off passengers at depot
+;   * Change direction based on tracks and switches
+HandleCell: lda PASS_COUNT      ; Is the trolley already full?
+            cmp #MAX_PASS       ; ,,
+            bcs drop_off        ; If not, check for waiting passengers
+            jsr CheckPass       ; ,,
+drop_off:   jsr CheckDepot      ; Check for depot and drop off passengers            
+srch_track: ldy #$00            ; Search track for table entry
+-loop:      lda TrackTurn,y
+            bmi PrepMove        ; End search if table ends
+            cmp UNDER_D         ; This is the newly-entered track character
+            beq found
+            iny                 ; Advance to next table entry
+            iny                 ; ,,
+            iny                 ; ,,
+            iny                 ; ,,
+            iny                 ; ,,
+            bne loop
+found:      tya                 ; A is the table index
+            clc                 ;   for addition
+            adc DIR             ; Add the current direction for the actual index
+            tay                 ; Put the index back in Y
+            lda TrackTurn,y     ; Get the new directon
+            and #$07            ; Mask off bit 3
+            cmp DIR             ; Is it a direction change?
+            beq PrepMove        ; If not, prepare for next movement
+            pha                 ; Store new direction during turn
+            clc                 ; Add old direction and new direction. If the
+            adc DIR             ;   sum is 5, then the turn is done with
+            cmp #$05            ;   the north-to-south (backslash) trolley.
+            beq bk              ;   If the sum is 3 or 7, the turn is done
+            lda #TROLLEY_FW     ;   with the south-to-north (forward slash)
+            .byte $3c           ;   trolley.
+bk:         lda #TROLLEY_BK     ;   ,,
+            ldx #<TR_DEST
+            ldy #>TR_DEST
+            jsr SetBitSrc
+            jsr BitMerge
+            lda SPEED
+            jsr Delay
+            pla
+            sta DIR
+            ; Fall through to PrepMove
+            
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; MOVEMENT ROUTINES
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;            
+; Prep for trolley movement in direction specified in DIR
+PrepMove:   lda TROLLEY         ; The TROLLEY pointer will contain the current
+            sta CURSOR          ;   trolley location, and the CURSOR pointer
+            lda TROLLEY+1       ;   will contain the trolley's destination
+            sta CURSOR+1        ;   ,,
+            ldx DIR             ;   ,,
+            jsr MoveCursor      ;   ,,
+            lda UNDER_D         ; Move the previous under track to the
+            sta UNDER_S         ;   new under track
+            ldy #$00            ; Set the new destination under; now we have
+            lda (CURSOR),y      ;   both UNDER characters, source and
+            sta UNDER_D         ;   destination
+            
+            ; Copies to be done to bitmap memory
+            ;   1) Character data from UNDER_S to TK_SOURCE memory
+            ;   2) Character data from UNDER_D to TK_DEST memory
+            ;   3) Character data from trolley to TR_SOURCE memory
+            ;   4) Zero out TR_DEST memory (using a space character)
+            lda UNDER_S         ; Fill the bitmap memory starting at TK_SOURCE
+            ldx #<TK_SOURCE     ; ,,
+            ldy #>TK_SOURCE     ; ,,
+            jsr SetBitSrc       ; ,,
+            lda UNDER_D         ; Fill the bitmap memory starting at TK_DEST
+            ldx #<TK_DEST       ; ,,
+            ldy #>TK_DEST       ; ,,
+            jsr SetBitSrc       ; ,,
+            ldx #TROLLEY_WE     ; Choose trolley character, default to west/east,
+            lda DIR             ;   based on trolley direction
+            and #$01            ; North and South have bit 0 set
+            beq copy_tr         ;   ,,
+            ldx #TROLLEY_NS     ;   ,,
+copy_tr:    txa                 ; Fill the bitmap memory starting at TR_SOURCE
+            ldx #<TR_SOURCE     ; ,,
+            ldy #>TR_SOURCE     ; ,,
+            jsr SetBitSrc       ; ,,
+            lda #$20            ; Fill the bitmap memory starting at TR_DEST
+            ldx #<TR_DEST       ; ,,
+            ldy #>TR_DEST       ; ,,
+            jsr SetBitSrc       ; ,,
+            jsr BitMerge        ; Merge the two bitmaps
+            ldy #$00            ; Update locations of bitmap characters
+            lda #B_SRC          ; ,,
+            sta (TROLLEY),y     ; ,,
+            lda #B_DEST         ; ,,
+            sta (CURSOR),y      ; ,,
+            lda #$07            ; Reset movement counter
+            sta MV_COUNT        ; ,,
+            rts
+            
+; Turn
+; Perform a turning maneuver in the direction (RIGHT, LEFT) in Accumulator
+Turn:       rts
+
+; Move Bitmap
+MoveBitmap: lda MV_COUNT        ; Are there any more moves to do?
+            bne shift_bit       ; 
+            lda UNDER_S         ; Restore the Under Source character to
+            ldy #$00            ;   the old trolley's position
+            sta (TROLLEY),y     ;   ,,
+            lda CURSOR          ; Update the trolley position
+            sta TROLLEY         ; ,,
+            lda CURSOR+1        ; ,,
+            sta TROLLEY+1       ; ,,
+            jmp HandleCell      ; Handle new cell
+shift_bit:  dec MV_COUNT
+            lda DIR
+            cmp #NORTH
+            beq mv_north
+            cmp #EAST
+            beq mv_east
+            cmp #SOUTH
+            beq mv_south
+            ; Fall through to mv_west
+mv_west:    ldy #$07            ; For each byte
+-loop:      lda TR_DEST,y       ; Shift the destination character left
+            asl                 ; ,,
+            sta TR_DEST,y       ; ,,
+            lda TR_SOURCE,y     ; Shift the source character left
+            asl                 ; ,,
+            sta TR_SOURCE,y     ; ,,
+            lda #$00            ; If the high bit of the source byte was 1,
+            adc TR_DEST,y       ;   then add 1 to the destination byte
+            sta TR_DEST,y       ;   and save it
+            dey
+            bpl loop
+            rts
+mv_east:    ldy #$07            ; For each byte
+-loop:      lda TR_DEST,y       ; Shift the destination character right
+            lsr                 ; ,,
+            sta TR_DEST,y       ; ,,
+            lda TR_SOURCE,y     ; Shift the source character right
+            lsr                 ; ,,
+            sta TR_SOURCE,y     ; ,,
+            bcc east_next       ; 
+            lda TR_DEST,y       ; If the low bit of the source byte was 1,
+            ora #$80            ;   then set the high bit of the destination
+            sta TR_DEST,y       ;   and save it
+east_next:  dey
+            bpl loop
+            rts
+mv_north:   ldy #$00
+-loop:      lda TR_DEST+1,y     ; Copy each byte from the byte below it
+            sta TR_DEST,y       ; ,,
+            iny
+            cpy #$07
+            bne loop
+            lda TR_SOURCE       ; Move the top byte of the source character to
+            sta TR_DEST+7       ;   the bottom of the destination character
+            ldy #$00
+-loop:      lda TR_SOURCE+1,y
+            sta TR_SOURCE,y
+            iny
+            cpy #$07
+            bne loop
+            lda #$00            ; Clear the bottom byte of the source character
+            sta TR_SOURCE+7     ; ,,
+            rts
+mv_south:   ldy #$06            ; Copy each byte from the byte above it
+-loop:      lda TR_DEST,y       ; ,,
+            sta TR_DEST+1,y     ; ,,
+            dey
+            bpl loop
+            lda TR_SOURCE+7     ; Copy the bottom of the source to the top of
+            sta TR_DEST         ;   the destination
+            ldy #$06
+-loop:      lda TR_SOURCE,y
+            sta TR_SOURCE+1,y
+            dey
+            bpl loop                    
+            lda #$00            ; Clear the top byte of the source character
+            sta TR_SOURCE       ; ,, 
+            rts
+
+; Bitmap Merge
+; Merge the bitmaps to TR_ and TK_ to the visible bitmap data
+BitMerge:   ldx #$07
+-loop:      lda TR_SOURCE,X
+            ora TK_SOURCE,x
+            sta BITMAP_S,x 
+            lda TR_DEST,x
+            ora TK_DEST,x
+            sta BITMAP_D,x
+            dex
+            bpl loop
+            rts
+            
+; Set bitmap source
+; A = Character number
+; X = Low byte of destination
+; Y = High byte of destination
+SetBitSrc:  stx ZP_DEST         ; Set the destination pointer
+            sty ZP_DEST+1       ; ,,          
+            ldy #<CharSet       ; Set the source pointer
+            sty ZP_SOURCE       ; ,,
+            ldy #>CharSet       ; ,,
+            sty ZP_SOURCE+1     ; ,,
+            tay                 ; Add 8 this many times
+            beq transcribe
+            dey
+-loop:      lda #$08
+            clc
+            adc ZP_SOURCE
+            sta ZP_SOURCE
+            bcc next_inc
+            inc ZP_SOURCE+1
+next_inc:   dey
+            bpl loop
+transcribe: ldy #$07
+-loop:      lda (ZP_SOURCE),y
+            sta (ZP_DEST),y
+            dey
+            bpl loop
+            rts           
+                        
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
 ; EFFECTS SERVICE
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;              
@@ -470,7 +856,6 @@ MusService: bit MUSIC_F
             sta THEME           ; ,,
             ora #$80            ; Gate the voice
             sta VOICEL          ; ,,
-
             lda FADE            ; Fade is a volume override. If fade is
             beq volreg          ;   set, it will decrease every note,
             dec FADE            ;   and the music will stop when it
@@ -484,9 +869,9 @@ note_r:     rts
 ; DATA
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 Intro:      .asc $93,$0d,$0d,$0d,$0d,$0d,$0d
-            .asc $1c,$21,$05,"    TROLLEY",$0d
-            .asc $1c,$21,$05,"        PROBLEM",$1c,$21
-            .asc $0d,$0d,$0d,$9f,"BY JASON JUSTIAN  2021",$0d,$0d
+            .asc $1f,"     TROLLEY",$0d,$0d
+            .asc "         PROBLEM",$0d
+            .asc $0d,$0d,"  2021 JASON JUSTIAN",$0d,$0d,$0d
             .asc "      PRESS FIRE",$00
 
 ; Manual Text            
@@ -502,8 +887,10 @@ Manual:     .asc $93,$05,"AVAST",$0d,$0d,$0d
             .asc "            AGENT ANZU",$00
 
 ; Score Bar
-ScoreTx:    .asc $13,$05,"SCORE ",$00
-HiTx:       .asc "  HIGH ",$00
+
+ScoreTx:    .asc $93,$90
+            .asc "   TROLLEY  PROBLEM",$0d
+            .asc "SCORE  PASSENGER  TIME",$00
 GameOverTx: .asc $13,$11,$11,$11,$11,$11,$11,$11,$11
             .asc $1d,$1d,$1d,$1d,$1d,$1d
             .asc $05," GAME OVER ",$00
@@ -530,21 +917,104 @@ FXTable:    .byte $8a,$13       ; 0- Med Pack Pickup
 ; Musical Themes
 Themes:     .word $5523
             .word $5555
+            
+; Track Turns
+; This table describes what turns are made when each kind of track is
+; entered from each direction. The first column specifies the track
+; character being entered. The next column four columns represent the
+; direction* the trolley is moving when the cell is entered. The value
+; in the column specifies the new direction* that the trolley should 
+; move. If the value is 0, there's no change in direction. If bit 3 is
+; set, the direction change should only happen if an adjacent switch is
+; on, and bit 3 is masked away.
+;
+; If a track does not appear in this table, no direction changes will happen
+; for that track.
+;
+; * 1=North 2=East 3=South 4=West
+;
+;                 TRK  1  2  3  4
+TrackTurn:  .byte $23, 0, 0, 2, 1   ; Curve E / N
+            .byte $26, 2, 0, 0, 3   ; Curve E / S
+            .byte $29, 0, 1, 4, 0   ; Curve W / N
+            .byte $2c, 4, 3, 0, 0   ; Curve W / S
+            .byte $27,10, 0,10, 1   ; E switchable
+            .byte $2b, 0, 9, 4, 9   ; N switchable
+            .byte $2d,12, 3,12, 0   ; W switchable
+            .byte $2e, 2,11, 0,11   ; S switchable            
+            .byte $ff               ; End of table
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LEVEL TABLE
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; There are 45 bytes per level
+; There are 48 bytes per level
 ; 32 bytes represent a 16x16 character grid for track placeholders
-; 13 bytes specify the locations of passengers and switches
-;    Passengers are first, and all entries are passengers until $00 is reached
-;    Then, the rest of the entries are switches
-;    So, the sum of passengers + switches is 12
-Levels:     .byte $ff,$ff,$81,$01,$81,$01,$81,$01
+;  1 byte specifies the coordinates of the goal depot
+;  1 byte specifies the level time limit in seconds
+; 14 bytes specify the locations of switches and passengers
+;    Switches are first, and all entries are switches until $00 is reached
+;    Then, the rest of the entries are passengers
+;    * So, the sum of passengers + switches is 13
+;    * The coordinate format is Y,X
+;    * To get a proper passenger count, put the passengers at the end of the
+;      data, using multiple $00s, if necessary
+Levels:
+Level1:     .byte $80,$00,$ff,$fe,$01,$02,$01,$02
+            .byte $01,$02,$01,$02,$7f,$02,$41,$02
+            .byte $41,$02,$41,$02,$7f,$f2,$01,$12
+            .byte $01,$12,$01,$fe,$00,$00,$00,$00
+            .byte $7d,$30,$68,$07,$00,$00,$00,$00
+            .byte $00,$00,$00,$00,$28,$80,$99,$e8
+
+Level2:     .byte $ff,$ff,$81,$01,$81,$01,$81,$01
             .byte $81,$01,$81,$01,$ff,$ff,$81,$01
             .byte $81,$01,$81,$01,$81,$01,$81,$01
             .byte $81,$01,$81,$01,$81,$01,$ff,$ff
+            .byte $99,$22,$33,$44,$55,$66,$77,$bb
+            .byte $00,$71,$73,$75,$77,$79,$7b,$7d
 
+Level3:     .byte $ff,$ff,$81,$01,$81,$01,$81,$01
+            .byte $81,$01,$81,$01,$ff,$ff,$81,$01
+            .byte $81,$01,$81,$01,$81,$01,$81,$01
+            .byte $81,$01,$81,$01,$81,$01,$ff,$ff
+            .byte $99,$22,$33,$44,$55,$66,$77,$bb
+            .byte $00,$71,$73,$75,$77,$79,$7b,$7d
+            
+Level4:     .byte $ff,$ff,$81,$01,$81,$01,$81,$01
+            .byte $81,$01,$81,$01,$ff,$ff,$81,$01
+            .byte $81,$01,$81,$01,$81,$01,$81,$01
+            .byte $81,$01,$81,$01,$81,$01,$ff,$ff
+            .byte $99,$22,$33,$44,$55,$66,$77,$bb
+            .byte $00,$71,$73,$75,$77,$79,$7b,$7d            
+            
+Level5:     .byte $ff,$ff,$81,$01,$81,$01,$81,$01
+            .byte $81,$01,$81,$01,$ff,$ff,$81,$01
+            .byte $81,$01,$81,$01,$81,$01,$81,$01
+            .byte $81,$01,$81,$01,$81,$01,$ff,$ff
+            .byte $99,$22,$33,$44,$55,$66,$77,$bb
+            .byte $00,$71,$73,$75,$77,$79,$7b,$7d            
+            
+Level6:     .byte $ff,$ff,$81,$01,$81,$01,$81,$01
+            .byte $81,$01,$81,$01,$ff,$ff,$81,$01
+            .byte $81,$01,$81,$01,$81,$01,$81,$01
+            .byte $81,$01,$81,$01,$81,$01,$ff,$ff
+            .byte $99,$22,$33,$44,$55,$66,$77,$bb
+            .byte $00,$71,$73,$75,$77,$79,$7b,$7d
+
+Level7:     .byte $ff,$ff,$81,$01,$81,$01,$81,$01
+            .byte $81,$01,$81,$01,$ff,$ff,$81,$01
+            .byte $81,$01,$81,$01,$81,$01,$81,$01
+            .byte $81,$01,$81,$01,$81,$01,$ff,$ff
+            .byte $99,$22,$33,$44,$55,$66,$77,$bb
+            .byte $00,$71,$73,$75,$77,$79,$7b,$7d
+                        
+Level8:     .byte $ff,$ff,$81,$01,$81,$01,$81,$01
+            .byte $81,$01,$81,$01,$ff,$ff,$81,$01
+            .byte $81,$01,$81,$01,$81,$01,$81,$01
+            .byte $81,$01,$81,$01,$81,$01,$ff,$ff
+            .byte $99,$22,$33,$44,$55,$66,$77,$bb
+            .byte $00,$71,$73,$75,$77,$79,$7b,$7d
+                                    
 Padding:    .asc "012345678901234567890123456789012345678901234567890123456789"
             .asc "012345678901234567890123456789012345678901234567890123456789"
             .asc "012345678901234567890123456789012345678901234567890123456789"
@@ -562,25 +1032,8 @@ Padding:    .asc "012345678901234567890123456789012345678901234567890123456789"
             .asc "012345678901234567890123456789012345678901234567890123456789"
             .asc "012345678901234567890123456789012345678901234567890123456789"
             .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "01234567890123456"
-
+            .asc "0123456"
+            
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; CUSTOM CHARACTER SET
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -620,26 +1073,26 @@ CharSet:    .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Placeholder
             .byte $00,$42,$62,$34,$18,$2c,$46,$42 ; X
             .byte $00,$42,$62,$34,$18,$18,$18,$3c ; Y
             .byte $00,$7e,$46,$0c,$18,$30,$62,$7e ; Z
-            .byte $00,$18,$18,$00,$3c,$3c,$18,$18 ; Passenger           ($1b)
-            .byte $00,$18,$18,$40,$3c,$1c,$18,$18 ; Passenger - Wave 1  ($1c)
-            .byte $00,$18,$18,$00,$7c,$1c,$18,$18 ; Passenger - Wave 2  ($1d)
-            .byte $00,$00,$10,$10,$10,$10,$38,$7c ; Switch off          ($1e)
-            .byte $00,$00,$02,$04,$08,$10,$38,$7c ; Switch on           ($1f)
+            .byte $00,$18,$18,$40,$3c,$1c,$18,$18 ; Passenger - Wave 1  ($1b)
+            .byte $00,$18,$18,$00,$7c,$1c,$18,$18 ; Passenger - Wave 2  ($1c)
+            .byte $00,$18,$18,$00,$3c,$3c,$18,$18 ; Passenger           ($1d)
+            .byte $00,$00,$00,$00,$04,$08,$10,$38 ; Switch on/turn      ($1e)
+            .byte $00,$00,$00,$00,$10,$10,$10,$38 ; Switch off/straight ($1f)
             .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Space               ($20)
-            .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Bitmap Source       ($21)
-            .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Bitmap Destination  ($22)
+            .byte $00,$10,$38,$6c,$fe,$54,$74,$ff ; Drop-off depot      ($21)
+            .byte $00,$78,$48,$7e,$4a,$7e,$6a,$ff ; Building            ($22)
             .byte $24,$3c,$27,$2a,$12,$0f,$00,$00 ; Curve E / N         ($23)
-            .byte $00,$00,$00,$00,$00,$00,$00,$00 ; <unused>            ($24)
+            .byte $00,$10,$38,$7e,$6a,$7e,$5e,$5e ; Starting depot      ($24)
             .byte $24,$3c,$24,$3c,$24,$3c,$24,$3c ; N <-> S             ($25)
             .byte $00,$00,$0f,$12,$2a,$27,$3c,$24 ; Curve E / S         ($26)
-            .byte $24,$3c,$27,$3d,$25,$3f,$24,$3c ; E switchable        ($27)
-            .byte $00,$00,$00,$00,$00,$00,$00,$00 ; <unused>            ($28)
+            .byte $26,$3d,$25,$3f,$25,$3c,$24,$3c ; E switchable        ($27)
+            .byte $00,$10,$38,$6c,$fe,$54,$74,$ff ; <unused>            ($28)
             .byte $24,$3c,$e4,$54,$48,$f0,$00,$00 ; Curve W / N         ($29)
             .byte $00,$00,$ff,$55,$55,$ff,$00,$00 ; W <-> E             ($2a)
-            .byte $24,$24,$ff,$55,$55,$ff,$00,$00 ; N switchable        ($2b)
+            .byte $48,$f0,$5f,$55,$55,$ff,$00,$00 ; N switchable        ($2b)
             .byte $00,$00,$f8,$4c,$54,$e4,$3c,$24 ; Curve W / S         ($2c)
-            .byte $24,$3c,$e4,$7c,$64,$fc,$24,$3c ; W switchable        ($2d)
-            .byte $00,$00,$ff,$55,$55,$ff,$24,$3c ; S switchable        ($2e)
+            .byte $24,$3c,$24,$bc,$64,$7c,$c4,$7c ; W switchable        ($2d)
+            .byte $00,$00,$ff,$55,$55,$ff,$09,$1e ; S switchable        ($2e)
             .byte $24,$3c,$e7,$59,$59,$e7,$24,$3c ; Cross               ($2f)
             .byte $00,$3c,$42,$42,$42,$42,$42,$3c ; 0
             .byte $00,$10,$30,$10,$10,$10,$10,$38 ; 1 
@@ -651,9 +1104,9 @@ CharSet:    .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Placeholder
             .byte $00,$7e,$42,$02,$0c,$18,$10,$38 ; 7
             .byte $00,$3c,$42,$72,$3c,$4e,$42,$3c ; 8
             .byte $00,$3c,$42,$42,$62,$1e,$42,$3c ; 9
-            .byte $00,$00,$3c,$7e,$7e,$3c,$00,$00 ; Trolley W-E         ($3a)
-            .byte $00,$18,$3c,$3c,$3c,$3c,$18,$00 ; Trolley N-S         ($3b)
-            .byte $00,$0c,$1e,$3e,$7c,$78,$30,$00 ; Trolley SW-NE       ($3c)
-            .byte $00,$30,$78,$7c,$3e,$1e,$0c,$00 ; Trolley NW-SW       ($3d)
-            .byte $00,$78,$48,$7e,$4a,$7e,$6a,$ff ; Building            ($3e)
-            .byte $00,$10,$38,$6c,$fe,$54,$74,$ff ; Depot               ($3f)
+            .byte $00,$7e,$ff,$ff,$ff,$ff,$7e,$00 ; Trolley W-E         ($3a)
+            .byte $3c,$3c,$7e,$7e,$7e,$7e,$3c,$3c ; Trolley N-S         ($3b)
+            .byte $0c,$1e,$3f,$7f,$fe,$fc,$78,$30 ; Trolley SW-NE   /   ($3c)
+            .byte $30,$78,$fc,$fe,$7f,$3f,$1e,$0c ; Trolley NW-SE   \   ($3d)
+BITMAP_S:   .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Bitmap Source       ($3e)
+BITMAP_D:   .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Bitmap Destination  ($3f)
