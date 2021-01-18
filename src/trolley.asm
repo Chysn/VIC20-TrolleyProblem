@@ -33,7 +33,7 @@ EAST        = $02               ; ,,
 SOUTH       = $03               ; ,,
 WEST        = $04               ; ,,
 FIRE        = $05               ; Joystick fire button pressed
-DEF_SPEED   = 8                 ; Default speed
+DEF_SPEED   = 4                 ; Default speed
 MAX_SPEED   = 3                 ; Maximum speed
 MIN_SPEED   = 10                ; Minimum speed
 MAX_PASS    = 4                 ; Maximum passengers on trolley
@@ -44,7 +44,9 @@ DROPOFF     = 50                ; Score when a passenger is dropped off
 
 ; Character constants
 PASS1       = $1b
+PASSENGER   = $1d
 SWITCH_OFF  = $1f
+SWITCH_ON   = $1e
 BUILDING    = $22
 DEPOT       = $21
 START_DEPOT = $24
@@ -96,12 +98,14 @@ SCORE       = $45               ; Score (2 bytes)
 HISCORE     = $47               ; High score (2 bytes)
 PLAY_FL     = $49               ; Play flag (determines behavior of ISR)
 WAITING     = $02               ; Passengers waiting
-PASS_COUNT  = $03               ; Passenger Count
+RIDING      = $03               ; Passenger Count
 DIR         = $04               ; Tolley direction
 TIME        = $05               ; Time remaining (seconds)
 UNDER_D     = $06               ; Character at trolley destination
 ZP_SOURCE   = $61               ; Zero page copy source (2 bytes)
-ZP_DEST     = $63               ; Zerp page copy destination (2 bytes)
+ZP_DEST     = $63               ; Zero page copy destination (2 bytes)
+C_SWITCH    = $65               ; Current switch pointer (2 bytes)
+SW_COL      = $67               ; Current switch color pointer (2 bytes)
 TR_SOURCE   = $0350             ; Trolley-only source bitmap (8 bytes)
 TR_DEST     = $0358             ; Trolley-only destination bitmap (8 bytes)
 TK_SOURCE   = $0360             ; Track-only source bitmap  (8 bytes)
@@ -110,6 +114,7 @@ MV_COUNT    = $0370             ; Bitmap movement countdown
 MOVE_FL     = $0371             ; Move flag
 SPEED       = $0372             ; Current speed
 SPEED_COUNT = $0373             ; Speed countdown
+SWITCH_FL   = $0374
 
 ; Sound Memory
 FX_REG      = $033c             ; Current effect frequency register
@@ -169,14 +174,28 @@ read_js:    jsr Joystick        ; Read the joystick
             beq Main            ; If no movement do nothing
 ch_fire:    cmp #FIRE           ; Has fire been pressed?
             bne handle_dir      ; If not, handle a direction
-            jsr TogSwitch       ; If fire is pressed, toggle current switch
+            jsr NextSwitch      ; If fire is pressed, toggle current switch
 debounce:   jsr Joystick        ; Debounce fire button:
             cmp #FIRE           ;   Check joystick for fire button release
             beq debounce        ;   before returning to Main
             bne Main            ;   ,,
-handle_dir: ; TODO Handle controls
-            jmp Main
-            
+handle_dir: cmp #NORTH
+            beq faster
+            cmp #SOUTH
+            beq slower
+            cmp #EAST
+            beq sw_on
+            lda #SWITCH_OFF
+            .byte $3c           ; Skip word
+sw_on:      lda #SWITCH_ON
+            ldx #$00
+            sta (C_SWITCH,x)
+            lda #$01            ; Launch switch effect
+            jsr FXLaunch        ; ,,
+            bne Main
+faster:     jmp Main
+slower:     jmp Main
+
  ; Custom ISR for music player and day counting
 ISR:        bit PLAY_FL         ; If the game is over, don't do anything
             bpl isr_r           ;   in this routine
@@ -256,7 +275,7 @@ ShowScore:  rts
 
 ; Reset Cursor
 ; To the top of the board
-ResetCur:   lda #$71            ; Set starting point for level
+ResetCur:   lda #$87            ; Set starting point for level
             sta CURSOR          ; ,,
             lda #>SCREEN        ; ,,
             sta CURSOR+1        ; ,,
@@ -331,6 +350,27 @@ draw_char:  pla                 ; Get the character back and draw it
 place_r:    pla                 ; Restore X for caller
             tax                 ; ,,
             rts
+            
+; Get Character
+; At direction specified by X
+GetChar:    txa                 ; Preserve X against MoveCursor
+            pha                 ; ,,
+            lda CURSOR          ; Preserve cursor
+            pha                 ; ,,
+            lda CURSOR+1        ; ,,
+            pha                 ; ,,
+            jsr MoveCursor      ; Move cursor in X direction
+            ldx #$00            ; Get character there
+            lda (CURSOR,x)      ; ,,
+            tay                 ; Stash it in Y
+            pla                 ; Bring the cursor back to center
+            sta CURSOR+1        ; ,,
+            pla                 ; ,,
+            sta CURSOR          ; ,,
+            pla                 ; Restore X
+            tax                 ; ,,
+            tya                 ; Restore A as return value
+            rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; SETUP ROUTINES
@@ -378,7 +418,7 @@ InitLevel:  ldy #$21            ; Get the time for the level
             lda #EAST           ; All levels start out with the
             sta DIR             ;   trolley moving east
             lda #$00            ; Clear the trolley
-            sta PASS_COUNT      ; ,,
+            sta RIDING          ; ,,
             lda #DEF_SPEED      ; Set starting speed
             sta SPEED           ; ,,
             sta SPEED_COUNT     ; ,,
@@ -456,11 +496,11 @@ unoccupied: pla                 ; Get the direction valu back for the shift
             ora #$20            ;   add a character offset and populate the
             sta (CURSOR,x)      ;   current cell
             cmp #START_DEPOT    ; Did we place the starting depot?
-            bne next_cell
+            bne next_cell       ;
             lda CURSOR          ; The trolley's starting position is
             sta TROLLEY         ;   one row below (22 cells after)
-            lda CURSOR+1        ;   the starting depot
-            sta TROLLEY+1       ;   ,,
+            ldx CURSOR+1        ;   the starting depot
+            stx TROLLEY+1       ;   ,,
             lda #$16            ;   ,,
             clc                 ;   ,,
             adc TROLLEY         ;   ,,
@@ -496,6 +536,11 @@ next_piece: pla
             iny
             cpy #$30            ; Reached end of level data
             bcc loop
+            lda #<SCREEN        ; Locate the first switch from the top
+            sta C_SWITCH        ;   of the screen
+            lda #>SCREEN        ;   ,,
+            sta C_SWITCH+1      ;   ,,
+            jsr NextSwitch      ;   ,,
             ; Fall through to CityScape
             
 ; Draw Buildings
@@ -519,26 +564,88 @@ CityScape:  ldy #$20            ; Coordinates of depot
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; GAME MECHANICS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Toggle Current Switch
-TogSwitch:  rts
+NextSwitch: lda C_SWITCH        ; Set the current switch back to yellow
+            sta SW_COL          ; ,,
+            lda C_SWITCH+1      ; ,,
+            clc                 ; ,,
+            adc #$78            ; ,,
+            sta SW_COL+1        ; ,,
+            ldx #$00            ; ,,
+            lda #$07            ; ,,
+            sta (SW_COL,x)      ; ,,
+look_more:  inc C_SWITCH
+            bne is_switch
+            inc C_SWITCH+1
+            lda C_SWITCH+1
+            cmp #$20
+            bne is_switch
+            lda #<SCREEN
+            sta C_SWITCH
+            lda #>SCREEN
+            sta C_SWITCH+1
+is_switch:  ldx #$00
+            lda (C_SWITCH,x)
+            cmp #SWITCH_OFF
+            beq next_sw_r
+            cmp #SWITCH_ON
+            bne look_more
+next_sw_r:  lda C_SWITCH        ; Set the new switch to black
+            sta SW_COL          ; ,,
+            lda C_SWITCH+1      ; ,,
+            clc                 ; ,,
+            adc #$78            ; ,,
+            sta SW_COL+1        ; ,,
+            ldx #$00            ; ,,
+            lda #$00            ; ,,
+            sta (SW_COL,x)      ; ,,
+            rts            
 
-; Check for Passengers
-; adjacent to the trolley
-CheckPass:  rts
-
-CheckDepot: rts
-           
+; Check Adjacent Cells
+Adjacent:   lda WAVING+3
+            eor #$40
+            sta WAVING+3
+            lda WAVING+4
+            eor #$40
+            sta WAVING+4
+end_wave:   lsr SWITCH_FL       ; Clear the switch flag
+            ldx #WEST           ; Start with WEST and go counterclockwise
+-loop:      jsr GetChar         ; Get charater in the X direction
+            cmp #SWITCH_ON      ; If it's a switch that's turned on, set the
+            bne ch_pass         ;   switch on flag
+            sec                 ;   ,,
+            ror SWITCH_FL       ;   ,,
+            rts
+ch_pass:    cmp #PASS1          ; If it's a passenger, check how many riders
+            bne ch_depot        ;   are currently onboard. If it's less than
+            lda RIDING          ;   the maximum, allow a new rider aboard
+            cmp #MAX_PASS       ;   ,,
+            bcs ch_depot        ;   ,,
+            jsr MoveCursor      ; Move cursor to where the passenger is
+            ldy #$00            ; If there's room on the trolley, pick up
+            lda #$20            ;   the passenger by incrementing the riding
+            sta (CURSOR),y      ;   count and decrementing the waiting count
+            inc RIDING          ;   ,,
+            dec WAITING         ;   ,,
+            lda #$00            ; Launch sound effect for pickup
+            jsr FXLaunch        ; ,,
+            rts
+ch_depot:   cmp #DEPOT          ; If it's the depot, clear the trolley and
+            bne ch_start        ;   increase the score. End the level if the
+                                ;   waiting count is zero.
+ch_start:   cmp #START_DEPOT    ; If it's the start depot, turn the trolley
+            bne next_adj        ;   around
+            lda #SOUTH          ;   ,,
+            sta DIR             ;   ,,
+next_adj:   dex
+            bne loop
+            rts
             
 ; Handle New Cell
 ; Check for several things upon entering a new cell
 ;   * Pick up new passengers
 ;   * Drop off passengers at depot
 ;   * Change direction based on tracks and switches
-HandleCell: lda PASS_COUNT      ; Is the trolley already full?
-            cmp #MAX_PASS       ; ,,
-            bcs drop_off        ; If not, check for waiting passengers
-            jsr CheckPass       ; ,,
-drop_off:   jsr CheckDepot      ; Check for depot and drop off passengers            
+HandleCell: jsr Adjacent        ; Handle passengers, depot, switches           
 srch_track: ldy #$00            ; Search track for table entry
 -loop:      lda TrackTurn,y
             bmi PrepMove        ; End search if table ends
@@ -555,8 +662,12 @@ found:      tya                 ; A is the table index
             adc DIR             ; Add the current direction for the actual index
             tay                 ; Put the index back in Y
             lda TrackTurn,y     ; Get the new directon
+            cmp #$08            ; Is bit 3 set for the new direction?
+            bcc no_switch       ; If so, it depends on whether there's an
+            bit SWITCH_FL       ;   adjacent switch turned Om
+            bpl PrepMove        ; If no switch is on, continue to go straight
             and #$07            ; Mask off bit 3
-            cmp DIR             ; Is it a direction change?
+no_switch:  cmp DIR             ; Is it a direction change?
             beq PrepMove        ; If not, prepare for next movement
             pha                 ; Store new direction during turn
             clc                 ; Add old direction and new direction. If the
@@ -566,14 +677,15 @@ found:      tya                 ; A is the table index
             lda #TROLLEY_FW     ;   with the south-to-north (forward slash)
             .byte $3c           ;   trolley.
 bk:         lda #TROLLEY_BK     ;   ,,
-            ldx #<TR_DEST
-            ldy #>TR_DEST
-            jsr SetBitSrc
-            jsr BitMerge
-            lda SPEED
-            jsr Delay
-            pla
-            sta DIR
+            ldx #<TR_DEST       ; OR merge the current track with the turning
+            ldy #>TR_DEST       ;   trolley characher
+            jsr SetBitSrc       ;   ,,
+            jsr BitMerge        ;   ,,
+            lda SPEED           ; Delay on the turn for twice the speed
+            asl                 ; ,,
+            jsr Delay           ; ,,
+            pla                 ; Get back the direction and set it as the
+            sta DIR             ;   new direction
             ; Fall through to PrepMove
             
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -889,8 +1001,8 @@ Manual:     .asc $93,$05,"AVAST",$0d,$0d,$0d
 ; Score Bar
 
 ScoreTx:    .asc $93,$90
-            .asc "   TROLLEY  PROBLEM",$0d
-            .asc "SCORE  PASSENGER  TIME",$00
+            .asc "   TROLLEY  PROBLEM",$0d,$0d
+            .asc "L  SCORE  RIDERS  TIME",$00
 GameOverTx: .asc $13,$11,$11,$11,$11,$11,$11,$11,$11
             .asc $1d,$1d,$1d,$1d,$1d,$1d
             .asc $05," GAME OVER ",$00
@@ -908,11 +1020,10 @@ JoyTable:   .byte 0,$04,$80,$08,$10,$20            ; Corresponding direction bit
 ;   (3) High nybble of the second byte (L) is the length in jiffies x 16
 ;       * Between approx. 1/4 sec and 4 sec in length
 ;   (4) Low nybble of second byte (S) is speed in jiffies
-FXTable:    .byte $8a,$13       ; 0- Med Pack Pickup
-            .byte $07,$34       ; 1- Med Pack Delivery
-            .byte $f0,$26       ; 2- Game Over
-            .byte $55,$24       ; 3- Low O2 Warning
-            .byte $87,$11       ; 4- Missing Med Pack
+FXTable:    .byte $36,$22       ; 0- Passenger pickup
+            .byte $84,$11       ; 1- Switch Switch
+            .byte $55,$24       ; 2- Drop off passengers
+            .byte $87,$11       ; 3- Missing Med Pack
 
 ; Musical Themes
 Themes:     .word $5523
@@ -964,7 +1075,7 @@ Level1:     .byte $80,$00,$ff,$fe,$01,$02,$01,$02
             .byte $41,$02,$41,$02,$7f,$f2,$01,$12
             .byte $01,$12,$01,$fe,$00,$00,$00,$00
             .byte $7d,$30,$68,$07,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$28,$80,$99,$e8
+            .byte $2c,$27,$25,$23,$2a,$80,$99,$e8
 
 Level2:     .byte $ff,$ff,$81,$01,$81,$01,$81,$01
             .byte $81,$01,$81,$01,$ff,$ff,$81,$01
@@ -1028,11 +1139,7 @@ Padding:    .asc "012345678901234567890123456789012345678901234567890123456789"
             .asc "012345678901234567890123456789012345678901234567890123456789"
             .asc "012345678901234567890123456789012345678901234567890123456789"
             .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "0123456"
+            .asc "0123456789012345678901234567890123456"
             
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; CUSTOM CHARACTER SET
@@ -1073,11 +1180,11 @@ CharSet:    .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Placeholder
             .byte $00,$42,$62,$34,$18,$2c,$46,$42 ; X
             .byte $00,$42,$62,$34,$18,$18,$18,$3c ; Y
             .byte $00,$7e,$46,$0c,$18,$30,$62,$7e ; Z
-            .byte $00,$18,$18,$40,$3c,$1c,$18,$18 ; Passenger - Wave 1  ($1b)
-            .byte $00,$18,$18,$00,$7c,$1c,$18,$18 ; Passenger - Wave 2  ($1c)
+WAVING:     .byte $00,$18,$18,$40,$3c,$1c,$18,$18 ; Passenger - Waving  ($1b)
+            .byte $00,$18,$18,$00,$7c,$1c,$18,$18 ; Passenger - Waving  ($1c)
             .byte $00,$18,$18,$00,$3c,$3c,$18,$18 ; Passenger           ($1d)
-            .byte $00,$00,$00,$00,$04,$08,$10,$38 ; Switch on/turn      ($1e)
-            .byte $00,$00,$00,$00,$10,$10,$10,$38 ; Switch off/straight ($1f)
+            .byte $00,$02,$04,$08,$10,$38,$7c,$7c ; Switch on/turn      ($1e)
+            .byte $00,$10,$10,$10,$10,$38,$7c,$7c ; Switch off/straight ($1f)
             .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Space               ($20)
             .byte $00,$10,$38,$6c,$fe,$54,$74,$ff ; Drop-off depot      ($21)
             .byte $00,$78,$48,$7e,$4a,$7e,$6a,$ff ; Building            ($22)
@@ -1104,9 +1211,9 @@ CharSet:    .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Placeholder
             .byte $00,$7e,$42,$02,$0c,$18,$10,$38 ; 7
             .byte $00,$3c,$42,$72,$3c,$4e,$42,$3c ; 8
             .byte $00,$3c,$42,$42,$62,$1e,$42,$3c ; 9
-            .byte $00,$7e,$ff,$ff,$ff,$ff,$7e,$00 ; Trolley W-E         ($3a)
-            .byte $3c,$3c,$7e,$7e,$7e,$7e,$3c,$3c ; Trolley N-S         ($3b)
-            .byte $0c,$1e,$3f,$7f,$fe,$fc,$78,$30 ; Trolley SW-NE   /   ($3c)
-            .byte $30,$78,$fc,$fe,$7f,$3f,$1e,$0c ; Trolley NW-SE   \   ($3d)
+            .byte $00,$7c,$fe,$fe,$fe,$fe,$7c,$00 ; Trolley W-E         ($3a)
+            .byte $3c,$7e,$7e,$7e,$7e,$7e,$3e,$00 ; Trolley N-S         ($3b)
+            .byte $08,$1e,$3e,$7f,$fe,$7c,$78,$10 ; Trolley SW-NE   /   ($3c)
+            .byte $10,$78,$7c,$fe,$7f,$3e,$1e,$08 ; Trolley NW-SE   \   ($3d)
 BITMAP_S:   .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Bitmap Source       ($3e)
 BITMAP_D:   .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Bitmap Destination  ($3f)
