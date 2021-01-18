@@ -27,20 +27,22 @@ BASIC:      .byte $0b,$10,$2a,$00,$9e,$34,$31,$31
 ; LABEL DEFINITIONS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Constants - Game Configuration
-SCRCOLVAL   = 142               ; Screen color
+SCRCOLVAL   = 136               ; Screen color
 NORTH       = $01               ; ,,
 EAST        = $02               ; ,,
 SOUTH       = $03               ; ,,
 WEST        = $04               ; ,,
 FIRE        = $05               ; Joystick fire button pressed
-DEF_SPEED   = 4                 ; Default speed
+DEF_SPEED   = 6                 ; Default speed
 MAX_SPEED   = 3                 ; Maximum speed
-MIN_SPEED   = 10                ; Minimum speed
+MIN_SPEED   = 12                ; Minimum speed
 MAX_PASS    = 4                 ; Maximum passengers on trolley
+TR_COLOR    = 6                 ; Track/Trolley color
 
 ; Score constants
 PICKUP      = 10                ; Score when a passenger is picked up
 DROPOFF     = 50                ; Score when a passenger is dropped off
+TIME_BONUS  = 5                 ; Time bonus
 
 ; Character constants
 PASS1       = $1b
@@ -83,7 +85,8 @@ CASECT      = $0291             ; Disable Commodore case
 PRTFIX      = $ddcd             ; Decimal display routine (A,X)
 CHROUT      = $ffd2             ; Output one character
 TIME_L      = $a2               ; Jiffy counter low
-TIME_M      = $a1               ; Jiffy counter middle  
+TIME_M      = $a1               ; Jiffy counter middle 
+PLOT        = $fff0             ; PLOT 
 
 ; Game Memory
 LEVEL       = $f7               ; Level pointer (2 bytes)
@@ -95,17 +98,21 @@ COLUMN      = $fd               ; [LEVEL DRAW] Column number
 JOYREG      = $fe               ; Joystick register storage
 TRMASK      = $fe               ; [LEVEL DRAW] Track mask
 SCORE       = $45               ; Score (2 bytes)
-HISCORE     = $47               ; High score (2 bytes)
+HISCORE     = $b2               ; High score (2 bytes)
 PLAY_FL     = $49               ; Play flag (determines behavior of ISR)
 WAITING     = $02               ; Passengers waiting
 RIDING      = $03               ; Passenger Count
 DIR         = $04               ; Tolley direction
 TIME        = $05               ; Time remaining (seconds)
 UNDER_D     = $06               ; Character at trolley destination
-ZP_SOURCE   = $61               ; Zero page copy source (2 bytes)
-ZP_DEST     = $63               ; Zero page copy destination (2 bytes)
-C_SWITCH    = $65               ; Current switch pointer (2 bytes)
-SW_COL      = $67               ; Current switch color pointer (2 bytes)
+ZP_SOURCE   = $07               ; Zero page copy source (2 bytes)
+ZP_DEST     = $09               ; Zero page copy destination (2 bytes)
+C_SWITCH    = $0b               ; Current switch pointer (2 bytes)
+SW_COL      = $b0               ; Current switch color pointer (2 bytes)
+LEVEL_NUM   = $0f               ; Current level number - 1
+JSREAD      = $10               ; Last joystick read
+SEC_COUNT   = $11               ; Second countdown
+TIMER_FL    = $12               ; Timer display flag
 TR_SOURCE   = $0350             ; Trolley-only source bitmap (8 bytes)
 TR_DEST     = $0358             ; Trolley-only destination bitmap (8 bytes)
 TK_SOURCE   = $0360             ; Track-only source bitmap  (8 bytes)
@@ -114,7 +121,7 @@ MV_COUNT    = $0370             ; Bitmap movement countdown
 MOVE_FL     = $0371             ; Move flag
 SPEED       = $0372             ; Current speed
 SPEED_COUNT = $0373             ; Speed countdown
-SWITCH_FL   = $0374
+SWITCH_FL   = $0374             ; Switch on flag
 
 ; Sound Memory
 FX_REG      = $033c             ; Current effect frequency register
@@ -166,26 +173,32 @@ NextLevel:  sei
 
 ; Main loop            
 Main:       bit MOVE_FL         ; If move flag is set, move the trolley
-            bpl read_js         ;   one pixel in the appropriate direction
+            bpl timer_disp      ;   one pixel in the appropriate direction
             jsr MoveBitmap      ;   ,,
             jsr BitMerge        ;   ,,
             lsr MOVE_FL         ; Clear move flag
+            lda TIME            ; Check for timer elapsed
+            bne timer_disp      ; ,,
+            jmp GameOver        ; ,,
+timer_disp: bit TIMER_FL        ; If the timer flag is set, show the score
+            bpl read_js         ; ,,
+            jsr ShowScore       ; ,,
+            lsr TIMER_FL        ; Clear the timer flag
 read_js:    jsr Joystick        ; Read the joystick
             beq Main            ; If no movement do nothing
 ch_fire:    cmp #FIRE           ; Has fire been pressed?
             bne handle_dir      ; If not, handle a direction
             jsr NextSwitch      ; If fire is pressed, toggle current switch
-debounce:   jsr Joystick        ; Debounce fire button:
-            cmp #FIRE           ;   Check joystick for fire button release
-            beq debounce        ;   before returning to Main
-            bne Main            ;   ,,
+            jmp Main            ;   ,,
 handle_dir: cmp #NORTH
             beq faster
             cmp #SOUTH
             beq slower
             cmp #EAST
             beq sw_on
-            lda #SWITCH_OFF
+            cmp #WEST
+            bne Main
+sw_off:     lda #SWITCH_OFF
             .byte $3c           ; Skip word
 sw_on:      lda #SWITCH_ON
             ldx #$00
@@ -193,15 +206,33 @@ sw_on:      lda #SWITCH_ON
             lda #$01            ; Launch switch effect
             jsr FXLaunch        ; ,,
             bne Main
-faster:     jmp Main
-slower:     jmp Main
+faster:     dec SPEED
+            dec SPEED
+            dec SPEED
+            lda SPEED
+            cmp #MAX_SPEED
+            bcs Main
+slower:     inc SPEED
+            inc SPEED
+            inc SPEED
+            lda SPEED
+            cmp #MIN_SPEED
+            bcc Main
+            bcs faster
 
  ; Custom ISR for music player and day counting
 ISR:        bit PLAY_FL         ; If the game is over, don't do anything
             bpl isr_r           ;   in this routine
             jsr FXService       ; Service sound effect
             jsr MusService      ; Service shift register music
-            dec SPEED_COUNT     ; Handle speed countdown for trolley
+            dec SEC_COUNT       ; Countdown to the next second
+            bne c_speed         ; ,,
+            dec TIME            ; Decrement the timer
+            sec                 ; Show and check the timer
+            ror TIMER_FL        ; ,,
+            lda #60             ; Reset the second counter
+            sta SEC_COUNT       ; ,,
+c_speed:    dec SPEED_COUNT     ; Handle speed countdown for trolley
             bne isr_r           ; ,, 
             lda SPEED           ; Reset the speed countdown
             sta SPEED_COUNT     ; ,,
@@ -213,12 +244,11 @@ isr_r:      jmp IRQ
 ; SUBROUTINES
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Wait for Fire
-Wait4Fire:  ;jsr Joystick        ; Wait for fire to be released
-            jmp Joystick
-            cpx #FIRE           ; ,,
+Wait4Fire:  jsr Joystick
+            cmp #FIRE           ; ,,
             beq Wait4Fire       ; ,,
 wait_fire:  jsr Joystick        ; Wait for the fire button
-            cpx #FIRE           ; ,,
+            cmp #FIRE           ; ,,
             bne wait_fire       ; ,,
             rts
             
@@ -242,7 +272,12 @@ Joystick:   lda VIA1PA          ; Read VIA1 port
             dex                 ; Loop back until found, or 0
             bne loop            ; ,,
 found_dir:  txa
-            rts         
+            cmp JSREAD          ; Debounce the joystick by setting
+            bne joystick_r      ;   the read value to 0 if it's the
+            lda #$00            ;   same as the last value
+            rts                 ;   ,,
+joystick_r: sta JSREAD          ; This is a new value, so return it and
+            rts                 ;   set the last read value
 
 ; Delay A Jiffies
 Delay:      clc
@@ -271,8 +306,32 @@ new_hs:     lda SCORE           ; A new high score has been
             sta HISCORE+1       ; ,,                
             ; Fall through to ShowScore
 
-ShowScore:  rts
-
+ShowScore:  lda #<ScoreBar      ; Set up score bar
+            ldy #>ScoreBar      ; ,,
+            jsr PRTSTR          ; ,,
+            lda LEVEL_NUM       ; Show level number
+            clc                 ; ,,
+            adc #$31            ; ,,
+            jsr CHROUT          ; ,,
+            lda #$20            ; Space before score
+            jsr CHROUT          ; ,,
+            ldx SCORE           ; Show the score
+            lda SCORE+1         ; ,,
+            jsr PRTFIX          ; ,,
+            ldx #$03
+            ldy #$0a
+            clc
+            jsr PLOT
+            ldx TIME            ; Get the time remaining
+            cpx #$ff            ; Check race conditions that involve
+            bne show_time       ;   the ISR reducing time below zero while
+            ldx #$00            ;   something else is going on
+show_time:  lda #$00            ; Show the time remaining
+            jsr PRTFIX          ; ,,
+            lda #$20            ; Space to clear unused tens
+            jsr CHROUT          ;   places
+            rts
+            
 ; Reset Cursor
 ; To the top of the board
 ResetCur:   lda #$87            ; Set starting point for level
@@ -401,8 +460,13 @@ InitGame:   lda #<Levels        ; Set the starting level
             lda #>Levels        ; ,,
             sta LEVEL+1         ; ,,
             lda #$00            ; Set the theme
-            sta FX_LEN          ; and effects length
-            jsr SelTheme        ; ,,
+            sta FX_LEN          ;   and effects length
+            sta LEVEL_NUM       ;   and level number
+            sta SCORE           ;   and score
+            sta SCORE+1         ;   ,,
+            sta TIMER_FL        ;   and timer flag
+            sta MOVE_FL         ;   and movement flag
+            jsr SelTheme        ; Set theme
             lda #$07            ; Set tempo
             sta TEMPO           ; ,,
             jsr MPlay           ; Start the music
@@ -419,12 +483,24 @@ InitLevel:  ldy #$21            ; Get the time for the level
             sta DIR             ;   trolley moving east
             lda #$00            ; Clear the trolley
             sta RIDING          ; ,,
+            sta MOVE_FL         ; and movement flag
+            sta MV_COUNT        ; and move count
             lda #DEF_SPEED      ; Set starting speed
             sta SPEED           ; ,,
             sta SPEED_COUNT     ; ,,
+            jsr CLSR            ; ,,
+            ldy #$00            ; Set track/trolley color
+            lda #TR_COLOR       ;   ,,
+-loop:      sta $9600,y         ;   ,,
+            sta $9700,y         ;   ,,
+            dey                 ;   ,,
+            bne loop            ;   ,,      
             lda #<ScoreTx       ; Show the top banner
             ldy #>ScoreTx       ; ,,
             jsr PRTSTR          ; ,,
+            lda #60             ; Set second countdown timer
+            sta SEC_COUNT       ; ,,
+            jsr MPlay           ; Start music
             ; Fall through to DrawLevel
 
 DrawLevel:  jsr ResetCur        ; Reset cursor to top left
@@ -559,6 +635,7 @@ CityScape:  ldy #$20            ; Coordinates of depot
             ldy TRMASK
             dey
             bne loop
+            jsr ShowScore       ; Show score at end of level draw
             rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -589,25 +666,44 @@ is_switch:  ldx #$00
             beq next_sw_r
             cmp #SWITCH_ON
             bne look_more
-next_sw_r:  lda C_SWITCH        ; Set the new switch to black
+next_sw_r:  lda C_SWITCH        ; Set the active switch color pointer
             sta SW_COL          ; ,,
             lda C_SWITCH+1      ; ,,
             clc                 ; ,,
             adc #$78            ; ,,
             sta SW_COL+1        ; ,,
-            ldx #$00            ; ,,
-            lda #$00            ; ,,
-            sta (SW_COL,x)      ; ,,
-            rts            
-
+            rts 
+            
+; Game Over            
+GameOver:   jsr ShowScore       ; Show final score
+            lda #<GameOverTx    ; Show Game Over text
+            ldy #>GameOverTx    ; ,,
+            jsr PRTSTR          ; ,,
+            lda #<HiScoreTx     ; Show High Score text
+            ldy #>HiScoreTx     ; ,,
+            jsr PRTSTR          ; ,,
+            ldx HISCORE         ; Show the high score
+            lda HISCORE+1       ; ,,
+            jsr PRTFIX          ; ,,            
+            lda #$0f            ; Fade out music at end of game
+            sta FADE            ; ,,
+            lda #$80            ; Delay for fade-out
+            jsr Delay           ; ,,
+            lsr PLAY_FL         ; Stop the play
+            jmp Start
+            
 ; Check Adjacent Cells
-Adjacent:   lda WAVING+3
-            eor #$40
-            sta WAVING+3
-            lda WAVING+4
-            eor #$40
-            sta WAVING+4
-end_wave:   lsr SWITCH_FL       ; Clear the switch flag
+Adjacent:   lda WAVING+3        ; A couple graphical tasks on each
+            eor #$40            ;   movement. First, change some bits in the
+            sta WAVING+3        ;   waiting passenger character so that
+            lda WAVING+4        ;   they look like they're waving
+            eor #$40            ;   ,,
+            sta WAVING+4        ;   ,,
+            ldx #$00            ; Then, flash the active switch color
+            lda #$02            ;   between yellow and green
+            eor (SW_COL,x)      ; ,,
+            sta (SW_COL,x)      ; ,,
+            lsr SWITCH_FL       ; Clear the switch flag
             ldx #WEST           ; Start with WEST and go counterclockwise
 -loop:      jsr GetChar         ; Get charater in the X direction
             cmp #SWITCH_ON      ; If it's a switch that's turned on, set the
@@ -626,26 +722,88 @@ ch_pass:    cmp #PASS1          ; If it's a passenger, check how many riders
             sta (CURSOR),y      ;   count and decrementing the waiting count
             inc RIDING          ;   ,,
             dec WAITING         ;   ,,
+            lda #PICKUP         ; Add score for the pickup
+            jsr AddScore        ; ,,
+            lda #PASSENGER      ; Add a passenger to the display
+            ldy RIDING          ; ,,
+            sta $1e50,y         ; ,,
+            lda #$03            ; Add the color
+            sta $9650,y         ; ,,
             lda #$00            ; Launch sound effect for pickup
             jsr FXLaunch        ; ,,
+            lda #$01            ; Flip the low shift register music bit on
+            eor THEME           ;   each pickup
+            sta THEME           ;   ,,
             rts
 ch_depot:   cmp #DEPOT          ; If it's the depot, clear the trolley and
-            bne ch_start        ;   increase the score. End the level if the
-                                ;   waiting count is zero.
+            bne ch_start        ;   increase the score
+            ldy RIDING          ; How many riders?
+            beq next_adj        ; If none, back to loop
+            jsr MStop           ; Stop music during dropoff
+-loop2:     lda #$20            ; Replace a rider with a space
+            sta $1e50,y         ; ,,
+            tya                 ; Preserve iterator
+            pha                 ; ,,
+            lda #DROPOFF        ; Add the score for each dropoff
+            jsr AddScore
+            lda #$02
+            jsr FXLaunch
+            lda #$10
+            jsr Delay
+            pla                 ; Restore iterator
+            tay                 ; ,,
+            dey
+            bne loop2
+            sty RIDING          ; Reset the riders counter
+            jsr MPlay
+            lda WAITING         ; If all the riders are dropped off,
+            bne adj_r           ;   advance to the next level
+            jmp Advance         ;   ,,
 ch_start:   cmp #START_DEPOT    ; If it's the start depot, turn the trolley
             bne next_adj        ;   around
             lda #SOUTH          ;   ,,
             sta DIR             ;   ,,
+            rts
 next_adj:   dex
             bne loop
-            rts
-            
+adj_r:      rts
+  
+; Advance to Next Level
+Advance:    jsr MStop           ; Stop music for bonus count
+            lda #$18
+            jsr Delay
+-loop:      lda #$03            ; Launch bonus sound
+            jsr FXLaunch        ; ,,
+            lda #TIME_BONUS
+            jsr AddScore
+            lda #$08
+            jsr Delay
+            dec TIME
+            bpl loop
+            lda #$00            ; Zero out time
+            sta TIME            ; ,,
+            jsr ShowScore       ; Show score to display 0 time
+            lda #60
+            jsr Delay
+            inc LEVEL_NUM
+            lda LEVEL_NUM       ; If the player finishes Level 9, the game is
+            cmp #$09            ;   over. Here for completeness, because 9
+            bne lv_data         ;   will be a kill screen.
+            jmp GameOver        ;   ,,
+lv_data:    lda #$30
+            clc
+            adc LEVEL
+            sta LEVEL
+            bcc advance_r
+            inc LEVEL+1
+advance_r:  jmp NextLevel           
+                                    
 ; Handle New Cell
 ; Check for several things upon entering a new cell
 ;   * Pick up new passengers
 ;   * Drop off passengers at depot
 ;   * Change direction based on tracks and switches
-HandleCell: jsr Adjacent        ; Handle passengers, depot, switches           
+HandleCell: jsr Adjacent        ; Handle passengers, depot, switches  
 srch_track: ldy #$00            ; Search track for table entry
 -loop:      lda TrackTurn,y
             bmi PrepMove        ; End search if table ends
@@ -685,7 +843,7 @@ bk:         lda #TROLLEY_BK     ;   ,,
             asl                 ; ,,
             jsr Delay           ; ,,
             pla                 ; Get back the direction and set it as the
-            sta DIR             ;   new direction
+            sta DIR             ;   new direction            
             ; Fall through to PrepMove
             
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -980,32 +1138,46 @@ note_r:     rts
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; DATA
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-Intro:      .asc $93,$0d,$0d,$0d,$0d,$0d,$0d
-            .asc $1f,"     TROLLEY",$0d,$0d
-            .asc "         PROBLEM",$0d
-            .asc $0d,$0d,"  2021 JASON JUSTIAN",$0d,$0d,$0d
+Intro:      .asc $93,$0d,$0d,$0d,$0d,$1f
+            .asc     "   &**************,",$0d
+            .asc     "   %              %",$0d
+            .asc $1f,"   %  TROLLEY  ",$5c,"  %",$0d
+            .asc     "   %              %",$0d
+            .asc     "   %  ",$5c,"  PROBLEM  %",$0d
+            .asc     "   %              %",$0d
+            .asc     "   #**************)",$0d
+            .asc $0d,$0d,"  2021 JASON JUSTIAN",$0d,$0d,$0d,$0d,$0d
             .asc "      PRESS FIRE",$00
 
 ; Manual Text            
-Manual:     .asc $93,$05,"AVAST",$0d,$0d,$0d
-            .asc "OUR UNDERSEA BASE IS",$0d,$0d
-            .asc "IN DANGER",$0d,$0d,$0d
-            .asc $9e,$29,$05," NAVIGATE YOUR SUB",$0d,$0d
-            .asc $1c,$21,$05," PICK UP A MED PACK",$0d,$0d
-            .asc "  FROM THE LIGHTHOUSE",$0d,$0d
-            .asc "@ DELIVER TO THE BASE",$0d,$0d
-            .asc $1e,$28,$05," AVOID SEA LIFE ",$0d,$0d
-            .asc $3a," WATCH YOUR OXYGEN ",$0d,$0d,$0d
-            .asc "            AGENT ANZU",$00
+Manual:     .asc $93,$0d,$1f,"      ALL ABOARD",$0d,$0d
+            .asc " ",$9f,$5f,$1f,"SWITCHES GUIDE THE",$0d
+            .asc "   TROLLEY TO PICK UP",$0d,$0d
+            .asc " ",$9f,$5c,$1f,"PASSENGERS AND DROP",$0d
+            .asc "   THEM OFF AT THE",$0d,$0d
+            .asc " ",$9f,"!",$1f,"DEPOT",$0d,$0d,$0d,$0d,$0d
+            .asc " FIRE SELECTS SWITCH",$0d,$0d
+            .asc " LEFT AND RIGHT SET",$0d
+            .asc "   STRAIGHT OR TURN",$0d,$0d
+            .asc " UP AND DOWN CONTROL",$0d
+            .asc "   TROLLEY SPEED",$00
 
 ; Score Bar
 
-ScoreTx:    .asc $93,$90
-            .asc "   TROLLEY  PROBLEM",$0d,$0d
-            .asc "L  SCORE  RIDERS  TIME",$00
-GameOverTx: .asc $13,$11,$11,$11,$11,$11,$11,$11,$11
-            .asc $1d,$1d,$1d,$1d,$1d,$1d
-            .asc $05," GAME OVER ",$00
+ScoreTx:    .asc $11,$1f,"   TROLLEY  PROBLEM",$0d
+            .asc $90," LV SCORE TIME RIDERS",$00
+ScoreBar:   .asc $13,$11,$11,$11,"  ",$90,$00
+GameOverTx: .asc $13,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11
+            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d,$1d
+            .asc "      ",$0d
+            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d,$1d
+            .asc $90," GAME ",$0d
+            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d,$1d
+            .asc " OVER ",$0d
+            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d,$1d
+            .asc "      ",$00           
+HiScoreTx:  .asc $13,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11
+            .asc $11,$11,$11,$11,$11,$11,$11,$11,$11,"    HIGH SCORE ",$00
             
 ; Direction Tables                       
 DirTable:   .byte $01,$ea,$01,$16,$ff
@@ -1022,8 +1194,8 @@ JoyTable:   .byte 0,$04,$80,$08,$10,$20            ; Corresponding direction bit
 ;   (4) Low nybble of second byte (S) is speed in jiffies
 FXTable:    .byte $36,$22       ; 0- Passenger pickup
             .byte $84,$11       ; 1- Switch Switch
-            .byte $55,$24       ; 2- Drop off passengers
-            .byte $87,$11       ; 3- Missing Med Pack
+            .byte $05,$13       ; 2- Drop off passengers
+            .byte $55,$12       ; 3- Bonus sound
 
 ; Musical Themes
 Themes:     .word $5523
@@ -1075,14 +1247,14 @@ Level1:     .byte $80,$00,$ff,$fe,$01,$02,$01,$02
             .byte $41,$02,$41,$02,$7f,$f2,$01,$12
             .byte $01,$12,$01,$fe,$00,$00,$00,$00
             .byte $7d,$30,$68,$07,$00,$00,$00,$00
-            .byte $2c,$27,$25,$23,$2a,$80,$99,$e8
+            .byte $00,$00,$00,$00,$2a,$80,$99,$e8
 
-Level2:     .byte $ff,$ff,$81,$01,$81,$01,$81,$01
-            .byte $81,$01,$81,$01,$ff,$ff,$81,$01
-            .byte $81,$01,$81,$01,$81,$01,$81,$01
-            .byte $81,$01,$81,$01,$81,$01,$ff,$ff
-            .byte $99,$22,$33,$44,$55,$66,$77,$bb
-            .byte $00,$71,$73,$75,$77,$79,$7b,$7d
+Level2:     .byte $80,$00,$ff,$fe,$01,$02,$01,$02
+            .byte $01,$02,$01,$02,$7f,$02,$41,$02
+            .byte $41,$02,$41,$02,$7f,$f2,$01,$12
+            .byte $01,$12,$01,$fe,$00,$00,$00,$00
+            .byte $7d,$30,$68,$07,$00,$00,$00,$00
+            .byte $00,$00,$00,$00,$2a,$80,$99,$e8
 
 Level3:     .byte $ff,$ff,$81,$01,$81,$01,$81,$01
             .byte $81,$01,$81,$01,$ff,$ff,$81,$01
@@ -1125,21 +1297,18 @@ Level8:     .byte $ff,$ff,$81,$01,$81,$01,$81,$01
             .byte $81,$01,$81,$01,$81,$01,$ff,$ff
             .byte $99,$22,$33,$44,$55,$66,$77,$bb
             .byte $00,$71,$73,$75,$77,$79,$7b,$7d
+
+Level9:     .byte $ff,$ff,$81,$01,$81,$01,$81,$01
+            .byte $81,$01,$81,$01,$ff,$ff,$81,$01
+            .byte $81,$01,$81,$01,$81,$01,$81,$01
+            .byte $81,$01,$81,$01,$81,$01,$ff,$ff
+            .byte $99,$22,$33,$44,$55,$66,$77,$bb
+            .byte $00,$71,$73,$75,$77,$79,$7b,$7d
                                     
 Padding:    .asc "012345678901234567890123456789012345678901234567890123456789"
             .asc "012345678901234567890123456789012345678901234567890123456789"
             .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "012345678901234567890123456789012345678901234567890123456789"
-            .asc "0123456789012345678901234567890123456"
+            .asc "0123456789012345678901234567890"
             
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; CUSTOM CHARACTER SET
