@@ -673,6 +673,8 @@ next_sw_r:  lda C_SWITCH        ; Set the active switch color pointer
             clc                 ; ,,
             adc #$78            ; ,,
             sta SW_COL+1        ; ,,
+            lda #$05            ; Set the color for visual cue
+            sta (SW_COL,x)      ; ,,
             rts 
 
 ; Pick up Passenger
@@ -1170,20 +1172,20 @@ Intro:      .asc $93,$0d,$0d,$0d,$0d,$1f
             .asc "      PRESS FIRE",$00
 
 ; Manual Text            
-Manual:     .asc $93,$0d,$1f,"      ALL ABOARD",$0d,$0d
+Manual:     .asc $93,$0d
             .asc " ",$9f,$5f,$1f,"SWITCHES GUIDE THE",$0d
-            .asc "   TROLLEY TO PICK UP",$0d,$0d
+            .asc "  TROLLEY TO PICK UP",$0d,$0d
             .asc " ",$9f,$5b,$1f,"PASSENGERS AND DROP",$0d
-            .asc "   THEM OFF AT THE",$0d,$0d
-            .asc " ",$9f,"!",$1f,"DEPOT",$0d,$0d,$0d,$0d,$0d
+            .asc "  THEM OFF AT THE",$0d,$0d
+            .asc " ",$9f,"!",$1f,"DEPOT ON TIME",$0d,$0d,$0d,$0d,$0d
             .asc " FIRE SELECTS SWITCH",$0d,$0d
-            .asc " LEFT AND RIGHT SET",$0d
-            .asc "   STRAIGHT OR TURN",$0d,$0d
-            .asc " UP AND DOWN CONTROL",$0d
-            .asc "   TROLLEY SPEED",$00
+            .asc " LEFT@RIGHT",$0d
+            .asc "  SET ",$9f,$5f,$1f,"STRAIGHT ",$9f,$5e,$1f,"TURN",$0d,$0d
+            .asc " UP@DOWN",$0d
+            .asc "  CONTROL SPEED",$0d,$0d
+            .asc " MAX RIDERS ",$9f,$5d,$5d,$5d,$5d,$00
 
-; Score Bar
-
+; Game Text
 ScoreTx:    .asc $11,$1f,"   TROLLEY  PROBLEM",$0d
             .asc $90," LV SCORE TIME RIDERS",$00
 ScoreBar:   .asc $13,$11,$11,$11,"  ",$90,$00
@@ -1247,7 +1249,7 @@ TrackTurn:  .byte $23, 0, 0, 2, 1   ; Curve E / N
             .byte $2e, 2,11, 0,11   ; S switchable            
             .byte $ff               ; End of table
 
-Padding:    .asc "JJ"
+Padding:    .asc "2021JEJ"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LEVEL TABLE
@@ -1360,7 +1362,7 @@ Level12:    .byte $00,$00,$00,$00,$00,$00,$00,$00
 ; a reliable method as long as you don't add anything AFTER this
 ; character data.
 ;
-CharSet:    .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Placeholder
+CharSet:    .byte $00,$00,$00,$38,$38,$38,$00,$00 ; Placeholder (+)
             .byte $00,$3c,$18,$24,$42,$7e,$46,$42 ; A
             .byte $00,$7c,$22,$3c,$22,$22,$22,$7c ; B
             .byte $00,$1a,$26,$42,$40,$40,$22,$1c ; C
@@ -1369,7 +1371,7 @@ CharSet:    .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Placeholder
             .byte $00,$7e,$20,$2c,$32,$22,$20,$60 ; F
             .byte $00,$3c,$42,$40,$4e,$52,$42,$3c ; G
             .byte $00,$66,$42,$5a,$66,$42,$42,$66 ; H
-            .byte $00,$7c,$38,$10,$10,$10,$38,$7c ; I
+            .byte $00,$7c,$30,$10,$10,$10,$18,$7c ; I
             .byte $1e,$1e,$14,$04,$04,$44,$44,$38 ; J
             .byte $00,$44,$48,$50,$60,$58,$44,$44 ; K
             .byte $00,$40,$40,$40,$40,$42,$44,$7c ; L
