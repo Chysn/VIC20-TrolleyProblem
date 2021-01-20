@@ -617,7 +617,7 @@ next_piece: pla
             sta C_SWITCH        ;   of the screen
             lda #>SCREEN        ;   ,,
             sta C_SWITCH+1      ;   ,,
-            jsr NextSwitch      ;   ,,
+            jsr SilentSw        ; Find next switch, with no sound
             ; Fall through to CityScape
             
 ; Draw Buildings
@@ -642,7 +642,9 @@ CityScape:  ldy #$20            ; Coordinates of depot
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; GAME MECHANICS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-NextSwitch: lda C_SWITCH        ; Set the current switch back to yellow
+NextSwitch: lda #$04            ; Launch switch sound
+            jsr FXLaunch        ; ,,
+SilentSw:   lda C_SWITCH        ; Set the current switch back to yellow
             sta SW_COL          ; ,,
             lda C_SWITCH+1      ; ,,
             clc                 ; ,,
@@ -1215,10 +1217,11 @@ JoyTable:   .byte 0,$04,$80,$08,$10,$20            ; Corresponding direction bit
 ;   (3) High nybble of the second byte (L) is the length in jiffies x 16
 ;       * Between approx. 1/4 sec and 4 sec in length
 ;   (4) Low nybble of second byte (S) is speed in jiffies
-FXTable:    .byte $36,$22       ; 0- Passenger pickup
-            .byte $84,$11       ; 1- Switch Switch
+FXTable:    .byte $36,$12       ; 0- Passenger pickup
+            .byte $7f,$11       ; 1- Switch Switch
             .byte $05,$13       ; 2- Drop off passengers
             .byte $55,$12       ; 3- Bonus sound
+            .byte $84,$11       ; 4- Next switch
 
 ; Musical Themes
 Themes:     .word $5523
@@ -1248,8 +1251,6 @@ TrackTurn:  .byte $23, 0, 0, 2, 1   ; Curve E / N
             .byte $2d,12, 3,12, 0   ; W switchable
             .byte $2e, 2,11, 0,11   ; S switchable            
             .byte $ff               ; End of table
-
-Padding:    .asc "2021JEJ"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LEVEL TABLE
