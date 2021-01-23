@@ -87,6 +87,7 @@ CHROUT      = $ffd2             ; Output one character
 TIME_L      = $a2               ; Jiffy counter low
 TIME_M      = $a1               ; Jiffy counter middle 
 PLOT        = $fff0             ; PLOT 
+ISCNTC      = $ffe1             ; Check Stop key
 
 ; Game Memory
 LEVEL       = $f7               ; Level pointer (2 bytes)
@@ -113,14 +114,14 @@ LEVEL_NUM   = $0f               ; Current level number - 1
 JSREAD      = $10               ; Last joystick read
 SEC_COUNT   = $11               ; Second countdown
 TIMER_FL    = $12               ; Timer display flag
+SPEED       = $b0               ; Current speed
+SPEED_COUNT = $b1               ; Speed countdown
 TR_SOURCE   = $0350             ; Trolley-only source bitmap (8 bytes)
 TR_DEST     = $0358             ; Trolley-only destination bitmap (8 bytes)
 TK_SOURCE   = $0360             ; Track-only source bitmap  (8 bytes)
 TK_DEST     = $0368             ; Track-only source bitmap (8 bytes)
 MV_COUNT    = $0370             ; Bitmap movement countdown
 MOVE_FL     = $0371             ; Move flag
-SPEED       = $0372             ; Current speed
-SPEED_COUNT = $0373             ; Speed countdown
 SWITCH_FL   = $0374             ; Switch on flag
 
 ; Sound Memory
@@ -147,8 +148,7 @@ Startup:    jsr SetupHW         ; Set up hardware
            
 ; Welcome Screen
 ; Show intro, set level, then show manual page      
-Welcome:    clc                 ; Disable the playing flag, in case we get
-            ror PLAY_FL         ;   here from the NMI
+Welcome:    lsr PLAY_FL         ; Clear play flag in case we get here from NMI
             lda #$00            ; Shut off all sounds
             sta VOICEL          ; ,,
             sta VOICEM          ; ,,
@@ -179,11 +179,13 @@ Main:       bit MOVE_FL         ; If move flag is set, move the trolley
             lsr MOVE_FL         ; Clear move flag
             lda TIME            ; Check for timer elapsed
             bne timer_disp      ; ,,
-            jmp GameOver        ; ,,
+end_level:  jmp GameOver        ; ,,
 timer_disp: bit TIMER_FL        ; If the timer flag is set, show the score
-            bpl read_js         ; ,,
+            bpl ch_stop         ; ,,
             jsr ShowScore       ; ,,
             lsr TIMER_FL        ; Clear the timer flag
+ch_stop:    jsr ISCNTC          ; End level if STOP key is pressed
+            beq end_level       ; ,,        
 read_js:    jsr Joystick        ; Read the joystick
             beq Main            ; If no movement do nothing
 ch_fire:    cmp #FIRE           ; Has fire been pressed?
@@ -218,7 +220,7 @@ slower:     inc SPEED
             lda SPEED
             cmp #MIN_SPEED
             bcc Main
-            bcs faster
+            bcs faster          
 
  ; Custom ISR for music player and day counting
 ISR:        bit PLAY_FL         ; If the game is over, don't do anything
@@ -644,15 +646,11 @@ CityScape:  ldy #$20            ; Coordinates of depot
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 NextSwitch: lda #$04            ; Launch switch sound
             jsr FXLaunch        ; ,,
-SilentSw:   lda C_SWITCH        ; Set the current switch back to yellow
-            sta SW_COL          ; ,,
-            lda C_SWITCH+1      ; ,,
-            clc                 ; ,,
-            adc #$78            ; ,,
-            sta SW_COL+1        ; ,,
-            ldx #$00            ; ,,
-            lda #$07            ; ,,
-            sta (SW_COL,x)      ; ,,
+SilentSw:   jsr flip            ; Flip switch zero page pointer to color
+            ldx #$00            ; Change the color of the last switch
+            lda #$07            ;   back to its original yellow
+            sta (C_SWITCH,x)    ;   ,,
+            jsr flip            ; Flip switch zero page back to screen
 look_more:  inc C_SWITCH
             bne is_switch
             inc C_SWITCH+1
@@ -669,15 +667,13 @@ is_switch:  ldx #$00
             beq next_sw_r
             cmp #SWITCH_ON
             bne look_more
-next_sw_r:  lda C_SWITCH        ; Set the active switch color pointer
-            sta SW_COL          ; ,,
-            lda C_SWITCH+1      ; ,,
-            clc                 ; ,,
-            adc #$78            ; ,,
-            sta SW_COL+1        ; ,,
-            lda #$05            ; Set the color for visual cue
-            sta (SW_COL,x)      ; ,,
-            rts 
+next_sw_r:  jsr flip
+            lda #$05
+            sta (C_SWITCH,x)
+flip:       lda C_SWITCH+1
+            eor #$88
+            sta C_SWITCH+1
+            rts            
 
 ; Pick up Passenger
 Pickup:     jsr MoveCursor      ; Move cursor to where the passenger is
@@ -735,11 +731,13 @@ Adjacent:   lda WAVING+3        ; A couple graphical tasks on each
             lda WAVING+4        ;   they look like they're waving
             eor #$40            ;   ,,
             sta WAVING+4        ;   ,,
+            jsr flip            ; Change C_SWITCH to color
             ldx #$00            ; Then, flash the active switch color
             lda #$02            ;   between yellow and green
-            eor (SW_COL,x)      ; ,,
-            sta (SW_COL,x)      ; ,,
-            lsr SWITCH_FL       ; Clear the switch flag
+            eor (C_SWITCH,x)    ; ,,
+            sta (C_SWITCH,x)    ; ,,
+            jsr flip            ; Change C_SWITCH back to screen
+            lsr SWITCH_FL       ; Initialize the switch flag
             ldx #WEST           ; Start with WEST and go counterclockwise
 -loop:      jsr GetChar         ; Get charater in the X direction
             cmp #SWITCH_ON      ; If it's a switch that's turned on, set the
@@ -1170,16 +1168,16 @@ Intro:      .asc $93,$0d,$0d,$0d,$0d,$1f
             .asc     "   %  !  PROBLEM  %",$0d
             .asc     "   %              %",$0d
             .asc     "   #**************)",$0d
-            .asc $0d,$0d,"  2021 JASON JUSTIAN",$0d,$0d,$0d,$0d,$0d
-            .asc "      PRESS FIRE",$00
+            .asc $0d,$0d,"  2021 JASON JUSTIAN",$0d,$0d,$0d,$0d,$0d,$0d
+            .asc "     @PRESS FIRE@",$00
 
 ; Manual Text            
 Manual:     .asc $93,$0d
-            .asc " ",$9f,$5f,$1f,"SWITCHES GUIDE THE",$0d
-            .asc "  TROLLEY TO PICK UP",$0d,$0d
-            .asc " ",$9f,$5b,$1f,"PASSENGERS AND DROP",$0d
-            .asc "  THEM OFF AT THE",$0d,$0d
-            .asc " ",$9f,"!",$1f,"DEPOT ON TIME",$0d,$0d,$0d,$0d,$0d
+            .asc " ",$9f,$5f,$1f," SWITCHES GUIDE THE",$0d
+            .asc "   TROLLEY TO PICK UP",$0d,$0d
+            .asc " ",$9f,$5b,$1f," RIDERS AND DROP",$0d
+            .asc "   THEM OFF AT THE",$0d,$0d
+            .asc " ",$9f,"!",$1f," DEPOT ON TIME",$0d,$0d,$0d,$0d,$0d
             .asc " FIRE SELECTS SWITCH",$0d,$0d
             .asc " LEFT@RIGHT",$0d
             .asc "  SET ",$9f,$5f,$1f,"STRAIGHT ",$9f,$5e,$1f,"TURN",$0d,$0d
@@ -1189,17 +1187,17 @@ Manual:     .asc $93,$0d
 
 ; Game Text
 ScoreTx:    .asc $11,$1f,"   TROLLEY  PROBLEM",$0d
-            .asc $90," LV SCORE TIME RIDERS",$00
+            .asc $90," LV@SCORE@TIME@RIDERS",$00
 ScoreBar:   .asc $13,$11,$11,$11,"  ",$90,$00
 GameOverTx: .asc $13,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11
-            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d,$1d
-            .asc "      ",$0d
-            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d,$1d
-            .asc $90," GAME ",$0d
-            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d,$1d
-            .asc " OVER ",$0d
-            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d,$1d
-            .asc "      ",$00    
+            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d
+            .asc $90,"&******,",$0d
+            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d
+            .asc "%",$1f," GAME ",$90,"%",$0d
+            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d
+            .asc "%",$1f," OVER ",$90,"%",$0d
+            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d
+            .asc "#******)",$00    
 VictoryTx   .asc $13,$11,$9e,"       VICTORY",$9f,$5b,"     ",$00                   
 HiScoreTx:  .asc $13,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11
             .asc $11,$11,$11,$11,$11,$11,$11,$11,$11,"    HIGH SCORE ",$00
@@ -1271,9 +1269,9 @@ Level1:     .byte $80,$00,$ff,$fe,$01,$02,$01,$02   ; Done
             .byte $01,$02,$01,$02,$7f,$02,$41,$02
             .byte $41,$02,$41,$02,$7f,$f2,$01,$12
             .byte $01,$12,$01,$fe,$00,$00,$00,$00
-            .byte $7d,$3c,$68,$07,$00,$00,$00,$00
+            .byte $7d,$2d,$68,$07,$00,$00,$00,$00
             .byte $00,$00,$00,$00,$2a,$80,$99,$e8
-
+            
 Level2:     .byte $00,$00,$07,$f8,$04,$08,$1e,$0e   ; Done
             .byte $12,$0a,$3a,$0a,$aa,$0a,$fa,$0a
             .byte $22,$0a,$22,$0a,$22,$0a,$3f,$fa
@@ -1286,35 +1284,35 @@ Level3:     .byte $7f,$c0,$40,$44,$e0,$44,$bc,$7e   ; Done
             .byte $e1,$de,$87,$54,$f4,$77,$9c,$45
             .byte $94,$7d,$f4,$01,$14,$01,$1f,$ff
             .byte $56,$1e,$2b,$38,$7d,$8a,$ac,$b6
-            .byte $00,$00,$00,$00,$ba,$b2,$62,$5f
+            .byte $00,$00,$00,$00,$ba,$b2,$62,$5f  
+                        
+Level4:     .byte $fe,$ff,$82,$81,$82,$81,$83,$8f   ; Done
+            .byte $82,$89,$82,$89,$fe,$ff,$10,$00
+            .byte $10,$80,$fe,$ff,$82,$89,$82,$89
+            .byte $83,$8f,$82,$81,$82,$81,$fe,$ff
+            .byte $29,$3c,$35,$7c,$8c,$a3,$c9,$00
+            .byte $00,$00,$c1,$bd,$a5,$5a,$54,$4d          
 
-Level4:     .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $00,$00,$80,$00,$ff,$c0,$04,$40
-            .byte $04,$40,$07,$c8,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $8a,$14,$11,$00,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$57,$58
-      
-Level5:     .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $00,$00,$80,$00,$ff,$c0,$04,$40
-            .byte $04,$40,$07,$c8,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $8a,$14,$11,$00,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$57,$58            
-            
-Level6:     .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $00,$00,$80,$00,$ff,$c0,$04,$40
-            .byte $04,$40,$07,$c8,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $8a,$14,$11,$00,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$57,$58            
-            
-Level7:     .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $00,$00,$80,$00,$ff,$c0,$04,$40
-            .byte $04,$40,$07,$c8,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $8a,$14,$11,$00,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$57,$58
+Level5:     .byte $80,$00,$e0,$7f,$3c,$41,$27,$c1   ; Done
+            .byte $e4,$4f,$bc,$49,$93,$e9,$9e,$39
+            .byte $82,$21,$fe,$39,$03,$e9,$01,$09
+            .byte $3f,$09,$20,$09,$3f,$ff,$00,$00
+            .byte $8e,$50,$43,$79,$97,$fc,$00,$bd
+            .byte $34,$44,$0c,$81,$99,$a4,$d4,$da 
+                        
+Level6:     .byte $80,$00,$ff,$ff,$48,$89,$48,$89   ; Done
+            .byte $48,$99,$4f,$f1,$44,$91,$45,$d1
+            .byte $7f,$7f,$05,$d0,$04,$90,$0f,$f0
+            .byte $08,$90,$0f,$f0,$02,$80,$03,$80
+            .byte $eb,$38,$04,$08,$0c,$88,$00,$2d
+            .byte $47,$42,$a6,$7e,$96,$9a,$c5,$29
+
+Level7:     .byte $42,$21,$42,$23,$43,$fe,$ff,$1a   ; Done
+            .byte $82,$1a,$f6,$1a,$15,$1a,$17,$fe
+            .byte $f7,$c2,$94,$1f,$97,$f9,$f2,$8f
+            .byte $9e,$f8,$92,$e8,$92,$28,$f3,$f8
+            .byte $66,$3c,$84,$8b,$8c,$c7,$00,$a2
+            .byte $25,$cd,$98,$e9,$8f,$5d,$41,$3a
 
 Level8:     .byte $00,$00,$00,$00,$00,$00,$00,$00
             .byte $00,$00,$80,$00,$ff,$c0,$04,$40
