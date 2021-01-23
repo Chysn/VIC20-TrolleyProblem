@@ -33,9 +33,9 @@ EAST        = $02               ; ,,
 SOUTH       = $03               ; ,,
 WEST        = $04               ; ,,
 FIRE        = $05               ; Joystick fire button pressed
-DEF_SPEED   = 6                 ; Default speed
+DEF_SPEED   = 7                 ; Default speed
 MAX_SPEED   = 3                 ; Maximum speed
-MIN_SPEED   = 12                ; Minimum speed
+MIN_SPEED   = 9                 ; Minimum speed
 MAX_PASS    = 4                 ; Maximum passengers on trolley
 TR_COLOR    = 6                 ; Track/Trolley color
 
@@ -208,19 +208,18 @@ sw_on:      lda #SWITCH_ON
             lda #$01            ; Launch switch effect
             jsr FXLaunch        ; ,,
             bne Main
-faster:     dec SPEED
-            dec SPEED
-            dec SPEED
-            lda SPEED
+faster:     lda SPEED
             cmp #MAX_SPEED
-            bcs Main
-slower:     inc SPEED
-            inc SPEED
-            inc SPEED
-            lda SPEED
+            beq Main
+            dec SPEED
+            dec SPEED
+            bne Main
+slower:     lda SPEED
             cmp #MIN_SPEED
-            bcc Main
-            bcs faster          
+            beq Main
+            inc SPEED
+            inc SPEED
+            bne Main
 
  ; Custom ISR for music player and day counting
 ISR:        bit PLAY_FL         ; If the game is over, don't do anything
@@ -475,7 +474,7 @@ InitCont:   lda #$00            ; Set the theme
             jsr MPlay           ; Start the music
             sec                 ; Set the game play flag
             ror PLAY_FL         ; ,,
-            lda #$18            ; Set volume and aux color
+            lda #$1a            ; Set volume and aux color
             sta VOLUME          ; ,,
             rts
             
@@ -707,7 +706,7 @@ Victory:    jsr ShowScore       ; Show final score
             ldx HISCORE         ; Show the high score
             lda HISCORE+1       ; ,,
             jsr PRTFIX          ; ,,            
-            lda #$0f            ; Fade out music at end of game
+            lda #$0a            ; Fade out music at end of game
             sta FADE            ; ,,
             lda #$80            ; Delay for fade-out
             jsr Delay           ; ,,
@@ -1051,7 +1050,7 @@ transcribe: ldy #$07
 ; plays the pitch      
 FXService:  lda FX_LEN          ; Has the sound been launched?
             beq fx_end          ; If unlaunched, kill voice and return
-            lda #$18            ; Make sure sound effects are not affected by
+            lda #$1a            ; Make sure sound effects are not affected by
             sta VOLUME          ;   music player's volume changes
             dec FX_LEN          ; Decrement both length
             dec FX_COUNT        ;   and countdown
@@ -1168,7 +1167,7 @@ Intro:      .asc $93,$0d,$0d,$0d,$0d,$1f
             .asc     "   %  !  PROBLEM  %",$0d
             .asc     "   %              %",$0d
             .asc     "   #**************)",$0d
-            .asc $0d,$0d,"  2021 JASON JUSTIAN",$0d,$0d,$0d,$0d,$0d,$0d
+            .asc $0d,$0d,"  2021 JASON JUSTIAN",$0d,$0d,$0d,$0d,$0d,$0d,$0d
             .asc "     @PRESS FIRE@",$00
 
 ; Manual Text            
@@ -1187,7 +1186,7 @@ Manual:     .asc $93,$0d
 
 ; Game Text
 ScoreTx:    .asc $11,$1f,"   TROLLEY  PROBLEM",$0d
-            .asc $90," LV@SCORE@TIME@RIDERS",$00
+            .asc $90," LV SCORE TIME RIDERS ",$00
 ScoreBar:   .asc $13,$11,$11,$11,"  ",$90,$00
 GameOverTx: .asc $13,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11
             .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d
@@ -1271,20 +1270,20 @@ Level1:     .byte $80,$00,$ff,$fe,$01,$02,$01,$02   ; Done
             .byte $01,$12,$01,$fe,$00,$00,$00,$00
             .byte $7d,$2d,$68,$07,$00,$00,$00,$00
             .byte $00,$00,$00,$00,$2a,$80,$99,$e8
+
+Level2:     .byte $7f,$c0,$40,$44,$e0,$44,$bc,$7e   ; Done
+            .byte $e4,$52,$05,$52,$05,$d2,$3c,$12
+            .byte $e1,$de,$87,$54,$f4,$77,$9c,$45
+            .byte $94,$7d,$f4,$01,$14,$01,$1f,$ff
+            .byte $56,$1e,$38,$7d,$ac,$b6,$00,$00
+            .byte $00,$00,$00,$00,$ba,$b2,$62,$5f      
             
-Level2:     .byte $00,$00,$07,$f8,$04,$08,$1e,$0e   ; Done
+Level3:     .byte $00,$00,$07,$f8,$04,$08,$1e,$0e   ; Done
             .byte $12,$0a,$3a,$0a,$aa,$0a,$fa,$0a
             .byte $22,$0a,$22,$0a,$22,$0a,$3f,$fa
             .byte $00,$22,$00,$22,$00,$22,$00,$3e
             .byte $6d,$3c,$63,$c6,$aa,$00,$00,$00
             .byte $47,$57,$67,$77,$8d,$c3,$c8,$ec
-
-Level3:     .byte $7f,$c0,$40,$44,$e0,$44,$bc,$7e   ; Done
-            .byte $e4,$52,$05,$52,$05,$d2,$3c,$12
-            .byte $e1,$de,$87,$54,$f4,$77,$9c,$45
-            .byte $94,$7d,$f4,$01,$14,$01,$1f,$ff
-            .byte $56,$1e,$2b,$38,$7d,$8a,$ac,$b6
-            .byte $00,$00,$00,$00,$ba,$b2,$62,$5f  
                         
 Level4:     .byte $fe,$ff,$82,$81,$82,$81,$83,$8f   ; Done
             .byte $82,$89,$82,$89,$fe,$ff,$10,$00
