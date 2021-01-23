@@ -27,7 +27,7 @@ BASIC:      .byte $0b,$10,$2a,$00,$9e,$34,$31,$31
 ; LABEL DEFINITIONS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Constants - Game Configuration
-SCRCOLVAL   = 136               ; Screen color
+SCRCOLVAL   = 238               ; Screen color
 NORTH       = $01               ; ,,
 EAST        = $02               ; ,,
 SOUTH       = $03               ; ,,
@@ -45,16 +45,16 @@ DROPOFF     = 50                ; Score when a passenger is dropped off
 TIME_BONUS  = 5                 ; Time bonus
 
 ; Character constants
-PASS1       = $1b
+PASS1       = $1a
 PASSENGER   = $1d
 SWITCH_OFF  = $1f
-SWITCH_ON   = $1e
-BUILDING    = $22
+SWITCH_ON   = $1b
+BUILDING    = $1e
 DEPOT       = $21
 START_DEPOT = $24
 TROLLEY_WE  = $28
 TROLLEY_NS  = $1c
-TROLLEY_FW  = $1a               ; Trolley that goes like a slash
+TROLLEY_FW  = $22               ; Trolley that goes like a slash
 TROLLEY_BK  = $3d               ; Trolley that goes like a backslash
 B_SRC       = $3e               ; Bipmap source character
 B_DEST      = $3f               ; Bipmap destination character
@@ -178,7 +178,7 @@ Main:       bit MOVE_FL         ; If move flag is set, move the trolley
             jsr BitMerge        ;   ,,
             lsr MOVE_FL         ; Clear move flag
             lda TIME            ; Check for timer elapsed
-            bne timer_disp      ; ,,
+            bpl timer_disp      ; ,,
 end_level:  jmp GameOver        ; ,,
 timer_disp: bit TIMER_FL        ; If the timer flag is set, show the score
             bpl ch_stop         ; ,,
@@ -324,9 +324,8 @@ ShowScore:  lda #<ScoreBar      ; Set up score bar
             clc
             jsr PLOT
             ldx TIME            ; Get the time remaining
-            cpx #$ff            ; Check race conditions that involve
-            bne show_time       ;   the ISR reducing time below zero while
-            ldx #$00            ;   something else is going on
+            bpl show_time       ; If negative, show 0 on the clock
+            ldx #$00            ; ,,
 show_time:  lda #$00            ; Show the time remaining
             jsr PRTFIX          ; ,,
             lda #$20            ; Space to clear unused tens
@@ -667,7 +666,7 @@ is_switch:  ldx #$00
             cmp #SWITCH_ON
             bne look_more
 next_sw_r:  jsr flip
-            lda #$05
+            lda #$00
             sta (C_SWITCH,x)
 flip:       lda C_SWITCH+1
             eor #$88
@@ -686,7 +685,7 @@ Pickup:     jsr MoveCursor      ; Move cursor to where the passenger is
             lda #PASSENGER      ; Add a passenger to the display
             ldy RIDING          ; ,,
             sta $1e50,y         ; ,,
-            lda #$03            ; Add the color
+            lda #$02            ; Add the color
             sta $9650,y         ; ,,
             lda #$00            ; Launch sound effect for pickup
             jsr FXLaunch        ; ,,
@@ -732,7 +731,7 @@ Adjacent:   lda WAVING+3        ; A couple graphical tasks on each
             sta WAVING+4        ;   ,,
             jsr flip            ; Change C_SWITCH to color
             ldx #$00            ; Then, flash the active switch color
-            lda #$02            ;   between yellow and green
+            lda #$07            ;   between yellow and black
             eor (C_SWITCH,x)    ; ,,
             sta (C_SWITCH,x)    ; ,,
             jsr flip            ; Change C_SWITCH back to screen
@@ -795,8 +794,6 @@ Advance:    jsr MStop           ; Stop music for bonus count
             jsr Delay
             dec TIME
             bpl loop
-            lda #$00            ; Zero out time
-            sta TIME            ; ,,
             jsr ShowScore       ; Show score to display 0 time
             lda #60
             jsr Delay
@@ -1162,31 +1159,31 @@ note_r:     rts
 Intro:      .asc $93,$0d,$0d,$0d,$0d,$1f
             .asc     "   &**************,",$0d
             .asc     "   %              %",$0d
-            .asc $1f,"   %  TROLLEY  ",$5b,"  %",$0d
+            .asc $1f,"   %  TROLLEY  Z  %",$0d
             .asc     "   %              %",$0d
             .asc     "   %  !  PROBLEM  %",$0d
             .asc     "   %              %",$0d
             .asc     "   #**************)",$0d
-            .asc $0d,$0d,"  2021 JASON JUSTIAN",$0d,$0d,$0d,$0d,$0d,$0d,$0d
+            .asc $0d,$0d,"  2021@JASON JUSTIAN",$0d,$0d,$0d,$0d,$0d,$0d,$0d
             .asc "     @PRESS FIRE@",$00
 
 ; Manual Text            
 Manual:     .asc $93,$0d
-            .asc " ",$9f,$5f,$1f," SWITCHES GUIDE THE",$0d
+            .asc " ",$9e,$5f,$1f," SWITCHES GUIDE THE",$0d
             .asc "   TROLLEY TO PICK UP",$0d,$0d
-            .asc " ",$9f,$5b,$1f," RIDERS AND DROP",$0d
+            .asc " ",$1c,"Z",$1f," RIDERS AND DROP",$0d
             .asc "   THEM OFF AT THE",$0d,$0d
-            .asc " ",$9f,"!",$1f," DEPOT ON TIME",$0d,$0d,$0d,$0d,$0d
-            .asc " FIRE SELECTS SWITCH",$0d,$0d
-            .asc " LEFT@RIGHT",$0d
-            .asc "  SET ",$9f,$5f,$1f,"STRAIGHT ",$9f,$5e,$1f,"TURN",$0d,$0d
-            .asc " UP@DOWN",$0d
-            .asc "  CONTROL SPEED",$0d,$0d
-            .asc " MAX RIDERS ",$9f,$5d,$5d,$5d,$5d,$00
+            .asc " ",$05,"!",$1f," DEPOT ON TIME",$0d,$0d,$0d
+            .asc " @FIRE  SELECT SWITCH",$0d,$0d
+            .asc " @LEFT  ",$9e,$5f,$1f," STRAIGHT",$0d,$0d
+            .asc " @RIGHT ",$9e,"[",$1f, " TURN",$0d,$0d
+            .asc " @UP    FASTER",$0d,$0d
+            .asc " @DOWN  SLOWER",$0d,$0d,$0d
+            .asc " MAX RIDERS ",$1c,$5d,$5d,$5d,$5d,$00
 
 ; Game Text
 ScoreTx:    .asc $11,$1f,"   TROLLEY  PROBLEM",$0d
-            .asc $90," LV SCORE TIME RIDERS ",$00
+            .asc $90," LV SCORE TIME RIDERS",$00
 ScoreBar:   .asc $13,$11,$11,$11,"  ",$90,$00
 GameOverTx: .asc $13,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11
             .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d
@@ -1197,7 +1194,7 @@ GameOverTx: .asc $13,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11
             .asc "%",$1f," OVER ",$90,"%",$0d
             .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d
             .asc "#******)",$00    
-VictoryTx   .asc $13,$11,$9e,"       VICTORY",$9f,$5b,"     ",$00                   
+VictoryTx   .asc $13,$11,$9e,"       VICTORY",$1c,"Z     ",$00                   
 HiScoreTx:  .asc $13,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11
             .asc $11,$11,$11,$11,$11,$11,$11,$11,$11,"    HIGH SCORE ",$00
             
@@ -1264,12 +1261,12 @@ TrackTurn:  .byte $23, 0, 0, 2, 1   ; Curve E / N
 ;    * To get a proper passenger count, put the passengers at the end of the
 ;      data, using multiple $00s, if necessary
 Levels:
-Level1:     .byte $80,$00,$ff,$fe,$01,$02,$01,$02   ; Done
-            .byte $01,$02,$01,$02,$7f,$02,$41,$02
-            .byte $41,$02,$41,$02,$7f,$f2,$01,$12
-            .byte $01,$12,$01,$fe,$00,$00,$00,$00
-            .byte $7d,$2d,$68,$07,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$2a,$80,$99,$e8
+Level1:     .byte $80,$00,$ff,$fe,$01,$02,$fd,$7a   ; Done
+            .byte $85,$4a,$bd,$4a,$a1,$4a,$af,$4a
+            .byte $a9,$7a,$a9,$02,$af,$f2,$a1,$12
+            .byte $bd,$12,$85,$fe,$84,$00,$fc,$00
+            .byte $4d,$2d,$07,$78,$00,$00,$00,$00
+            .byte $00,$00,$00,$00,$e8,$99,$93,$2a
 
 Level2:     .byte $7f,$c0,$40,$44,$e0,$44,$bc,$7e   ; Done
             .byte $e4,$52,$05,$52,$05,$d2,$3c,$12
@@ -1313,12 +1310,12 @@ Level7:     .byte $42,$21,$42,$23,$43,$fe,$ff,$1a   ; Done
             .byte $66,$3c,$84,$8b,$8c,$c7,$00,$a2
             .byte $25,$cd,$98,$e9,$8f,$5d,$41,$3a
 
-Level8:     .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $00,$00,$80,$00,$ff,$c0,$04,$40
-            .byte $04,$40,$07,$c8,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $8a,$14,$11,$00,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$57,$58
+Level8:     .byte $7f,$ff,$40,$81,$5d,$dd,$77,$75   ; Done
+            .byte $1d,$dd,$08,$01,$1d,$dd,$95,$57
+            .byte $fd,$dc,$08,$88,$08,$88,$1d,$dc
+            .byte $77,$54,$5d,$dc,$40,$08,$7f,$f8
+            .byte $e0,$40,$34,$38,$3c,$74,$78,$7c
+            .byte $c4,$c8,$cc,$00,$41,$46,$99,$9d
                         
 Level9:     .byte $00,$00,$00,$00,$00,$00,$00,$00
             .byte $00,$00,$80,$00,$ff,$c0,$04,$40
@@ -1369,7 +1366,7 @@ CharSet:    .byte $00,$00,$00,$38,$38,$38,$00,$00 ; Placeholder (+)
             .byte $00,$7e,$20,$2c,$32,$22,$20,$60 ; F
             .byte $00,$3c,$42,$40,$4e,$52,$42,$3c ; G
             .byte $00,$66,$42,$5a,$66,$42,$42,$66 ; H
-            .byte $00,$7c,$30,$10,$10,$10,$18,$7c ; I
+            .byte $00,$7c,$38,$10,$10,$10,$38,$7c ; I
             .byte $1e,$1e,$14,$04,$04,$44,$44,$38 ; J
             .byte $00,$44,$48,$50,$60,$58,$44,$44 ; K
             .byte $00,$40,$40,$40,$40,$42,$44,$7c ; L
@@ -1387,17 +1384,17 @@ CharSet:    .byte $00,$00,$00,$38,$38,$38,$00,$00 ; Placeholder (+)
             .byte $00,$42,$62,$34,$18,$2c,$46,$42 ; X
             .byte $00,$42,$62,$34,$18,$18,$18,$3c ; Y
 ;           .byte $00,$7e,$46,$0c,$18,$30,$62,$7e ; Z
-            .byte $08,$1e,$3e,$7f,$fe,$7c,$78,$10 ; Trolley SW-NE   /   ($1a)
-WAVING:     .byte $00,$18,$18,$40,$3c,$1c,$18,$18 ; Passenger - Waving  ($1b)
+WAVING:     .byte $00,$18,$18,$40,$3c,$1c,$18,$18 ; Passenger - Waving  ($1a)
+            .byte $00,$02,$04,$08,$10,$38,$7c,$7c ; Switch on/turn      ($1b)
             .byte $3c,$7e,$7e,$7e,$7e,$7e,$3e,$00 ; Trolley N-S         ($1c)
             .byte $00,$18,$18,$00,$3c,$3c,$18,$18 ; Passenger           ($1d)
-            .byte $00,$02,$04,$08,$10,$38,$7c,$7c ; Switch on/turn      ($1e)
+            .byte $00,$78,$48,$7e,$4a,$7e,$6a,$ff ; Building            ($1e)
             .byte $00,$10,$10,$10,$10,$38,$7c,$7c ; Switch off/straight ($1f)
             .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Space               ($20)
-            .byte $00,$10,$38,$6c,$fe,$54,$74,$ff ; Drop-off depot      ($21)
-            .byte $00,$78,$48,$7e,$4a,$7e,$6a,$ff ; Building            ($22)
+            .byte $00,$10,$38,$6c,$fe,$54,$74,$ff ; Starting depot      ($21)
+            .byte $08,$1e,$3e,$7f,$fe,$7c,$78,$10 ; Trolley SW-NE       ($22)
             .byte $24,$3c,$27,$2a,$12,$0f,$00,$00 ; Curve E / N         ($23)
-            .byte $00,$10,$38,$7e,$6a,$7e,$5e,$00 ; Starting depot      ($24)
+            .byte $00,$10,$38,$7e,$6a,$7e,$5e,$00 ; Drop-off depot      ($24)
             .byte $24,$3c,$24,$3c,$24,$3c,$24,$3c ; N <-> S             ($25)
             .byte $00,$00,$0f,$12,$2a,$27,$3c,$24 ; Curve E / S         ($26)
             .byte $24,$3e,$27,$3d,$25,$3f,$26,$3c ; E switchable        ($27)
@@ -1422,6 +1419,6 @@ WAVING:     .byte $00,$18,$18,$40,$3c,$1c,$18,$18 ; Passenger - Waving  ($1b)
             .byte $00,$4e,$ca,$51,$51,$51,$4a,$ee ; 10
             .byte $00,$44,$cc,$44,$44,$44,$44,$ee ; 11
             .byte $00,$46,$c9,$41,$41,$46,$48,$ef ; 12            
-            .byte $10,$78,$7c,$fe,$7f,$3e,$1e,$08 ; Trolley NW-SE   \   ($3d)
+            .byte $10,$78,$7c,$fe,$7f,$3e,$1e,$08 ; Trolley NW-SE       ($3d)
 BITMAP_S:   .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Bitmap Source       ($3e)
 BITMAP_D:   .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Bitmap Destination  ($3f)
