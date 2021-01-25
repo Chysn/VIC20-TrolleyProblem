@@ -61,8 +61,8 @@ B_DEST      = $3f               ; Bipmap destination character
 
 ; System Resources
 CINV        = $0314             ; ISR vector
-;NMINV       = $0318             ; Release NMI vector
-NMINV       = $fffe             ; Development NMI non-vector
+NMINV       = $0318             ; Release NMI vector
+;NMINV       = $fffe             ; Development NMI non-vector
 SCREEN      = $1e00             ; Screen character memory (unexpanded)
 COLOR       = $9600             ; Screen color memory (unexpanded)
 IRQ         = $eabf             ; System ISR   
@@ -99,7 +99,6 @@ COLUMN      = $fd               ; [LEVEL DRAW] Column number
 JOYREG      = $fe               ; Joystick register storage
 TRMASK      = $fe               ; [LEVEL DRAW] Track mask
 SCORE       = $45               ; Score (2 bytes)
-HISCORE     = $b2               ; High score (2 bytes)
 PLAY_FL     = $49               ; Play flag (determines behavior of ISR)
 WAITING     = $02               ; Passengers waiting
 RIDING      = $03               ; Passenger Count
@@ -109,34 +108,35 @@ UNDER_D     = $06               ; Character at trolley destination
 ZP_SOURCE   = $07               ; Zero page copy source (2 bytes)
 ZP_DEST     = $09               ; Zero page copy destination (2 bytes)
 C_SWITCH    = $0b               ; Current switch pointer (2 bytes)
-SW_COL      = $b0               ; Current switch color pointer (2 bytes)
 LEVEL_NUM   = $0f               ; Current level number - 1
 JSREAD      = $10               ; Last joystick read
 SEC_COUNT   = $11               ; Second countdown
 TIMER_FL    = $12               ; Timer display flag
 SPEED       = $b0               ; Current speed
 SPEED_COUNT = $b1               ; Speed countdown
+MOVE_FL     = $b2               ; Move flag
+SWITCH_FL   = $b3               ; Switch on flag
+HISCORE     = $b4               ; High score (2 bytes)
+MV_COUNT    = $b6               ; Bitmap movement countdown
+VICTORY_FL  = $b7               ; Victory!
 TR_SOURCE   = $0350             ; Trolley-only source bitmap (8 bytes)
 TR_DEST     = $0358             ; Trolley-only destination bitmap (8 bytes)
 TK_SOURCE   = $0360             ; Track-only source bitmap  (8 bytes)
 TK_DEST     = $0368             ; Track-only source bitmap (8 bytes)
-MV_COUNT    = $0370             ; Bitmap movement countdown
-MOVE_FL     = $0371             ; Move flag
-SWITCH_FL   = $0374             ; Switch on flag
 
 ; Sound Memory
-FX_REG      = $033c             ; Current effect frequency register
-FX_LEN      = $033d             ; Current effect length
-FX_COUNT    = $033e             ; Effect countdown for current effect
-FX_DIR      = $033f             ; Effect direction ($00 = left, $80 = right)
-FX_SPEED    = $0340             ; Effect countdown reset value
+FX_REG      = $a4               ; Current effect frequency register
+FX_LEN      = $a5               ; Current effect length
+FX_COUNT    = $a6               ; Effect countdown for current effect
+FX_DIR      = $a7               ; Effect direction ($00 = left, $80 = right)
+FX_SPEED    = $a8               ; Effect countdown reset value
 
 ; Music Memory
-THEME       = $0341             ; Music shift register theme (2 bytes)
-TEMPO       = $0343             ; Tempo (lower numbers are faster)
-MUCD        = $0344             ; Tempo countdown
-MUSIC_F     = $0345             ; Music is playing
-FADE        = $0346             ; Fadeout volume
+THEME       = $26               ; Music shift register theme (2 bytes)
+TEMPO       = $28               ; Tempo (lower numbers are faster)
+MUCD        = $29               ; Tempo countdown
+MUSIC_F     = $2a               ; Music is playing
+FADE        = $2b               ; Fadeout volume
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; MAIN PROGRAM
@@ -148,7 +148,9 @@ Startup:    jsr SetupHW         ; Set up hardware
            
 ; Welcome Screen
 ; Show intro, set level, then show manual page      
-Welcome:    lsr PLAY_FL         ; Clear play flag in case we get here from NMI
+Welcome:    lda #SCRCOLVAL      ; Set background color
+            sta SCRCOL          ; ,,
+            lsr PLAY_FL         ; Clear play flag in case we get here from NMI
             lda #$00            ; Shut off all sounds
             sta VOICEL          ; ,,
             sta VOICEM          ; ,,
@@ -166,7 +168,7 @@ Welcome:    lsr PLAY_FL         ; Clear play flag in case we get here from NMI
 Start:      jsr Wait4Fire
             jsr InitGame        ; Initialize game and draw first level
             
-NextLevel:  sei
+Level:      sei
             jsr InitLevel       ; Initialize Level
             cli
             jsr PrepMove
@@ -180,6 +182,7 @@ Main:       bit MOVE_FL         ; If move flag is set, move the trolley
             lda TIME            ; Check for timer elapsed
             bpl timer_disp      ; ,,
 end_level:  jmp GameOver        ; ,,
+            ;jmp DIAGNOSTIC     ; Comment previous, uncomment this
 timer_disp: bit TIMER_FL        ; If the timer flag is set, show the score
             bpl ch_stop         ; ,,
             jsr ShowScore       ; ,,
@@ -437,8 +440,6 @@ GetChar:    txa                 ; Preserve X against MoveCursor
 ; Setup Hardware
 SetupHW:    lda #$ff            ; Set custom character location
             sta VICCR5          ; ,,
-            lda #SCRCOLVAL      ; Set background color
-            sta SCRCOL          ; ,,
             lda #$7f            ; Set DDR to read East
             sta VIA2DD          ; ,,
             lda #$80            ; Disable Commodore-Shift
@@ -455,7 +456,9 @@ SetupHW:    lda #$ff            ; Set custom character location
             cli                 ; ,,
             rts
 
-InitGame:   lda #<Levels        ; Set the starting level
+InitGame:   lda #SCRCOLVAL      ; Set background color
+            sta SCRCOL          ; ,,
+            lda #<Levels        ; Set the starting level
             sta LEVEL           ; ,,
             lda #>Levels        ; ,,
             sta LEVEL+1         ; ,,
@@ -473,7 +476,7 @@ InitCont:   lda #$00            ; Set the theme
             jsr MPlay           ; Start the music
             sec                 ; Set the game play flag
             ror PLAY_FL         ; ,,
-            lda #$1a            ; Set volume and aux color
+            lda #$0a            ; Set volume and aux color
             sta VOLUME          ; ,,
             rts
             
@@ -489,6 +492,7 @@ InitLevel:  ldy #$21            ; Get the time for the level
             lda #DEF_SPEED      ; Set starting speed
             sta SPEED           ; ,,
             sta SPEED_COUNT     ; ,,
+            lsr VICTORY_FL      ; Reset victory flag
             jsr CLSR            ; ,,
             ldy #$00            ; Set track/trolley color
             lda #TR_COLOR       ;   ,,
@@ -710,17 +714,12 @@ Victory:    jsr ShowScore       ; Show final score
             lda #$80            ; Delay for fade-out
             jsr Delay           ; ,,
             lsr PLAY_FL         ; Stop the play
-            lda LEVEL_NUM       ; If the player lost or won level 12,
-            cmp #$0c            ;   pressing fire will start a new
-            bne continue        ;   game at level 1. You cannot continue
-            jmp Start           ;   level 12!
-continue:   jsr Wait4Fire       ; If the fire button is pressed here,
-            jsr InitCont        ;   continue at the current level
-            sei                 ;   ,,
-            jsr InitLevel       ;   ,,
-            cli                 ;   ,,
-            jsr PrepMove        ; Prep move at the last level
-            jmp Main            ;   and back to Main
+            bit VICTORY_FL      ; Has the player won the game?
+            bpl retry           ; If not, then fire retries the same level
+            jmp Start           ; Otherwise, fire restarts the game
+retry:      jsr Wait4Fire       ; If the fire button is pressed here,
+            jsr InitCont        ;   retry the current level
+            jmp Level           ;   ,,
             
 ; Check Adjacent Cells
 Adjacent:   lda WAVING+3        ; A couple graphical tasks on each
@@ -797,22 +796,28 @@ Advance:    jsr MStop           ; Stop music for bonus count
             jsr ShowScore       ; Show score to display 0 time
             lda #60
             jsr Delay
-            inc LEVEL_NUM
+DIAGNOSTIC: inc LEVEL_NUM
             lda LEVEL_NUM       ; If the player finishes Level 12, the game is
             cmp #$0d            ;   over
             bne lv_data
+            inc SCRCOL          ; Change the border color for victory
             lda #<VictoryTx     ; Show Victory text
             ldy #>VictoryTx     ; ,,
             jsr PRTSTR          ; ,,        
             dec LEVEL_NUM       ; Reduce the level number for display
-            jmp Victory         ; ,,
+            jsr MStop           ; Stop music
+            lda #$05            ; Launch victory tune
+            jsr FXLaunch        ; ,,
+            sec                 ; Set Victory flag
+            ror VICTORY_FL      ; ,,
+            jmp Victory         ; End the game
 lv_data:    lda #$30
             clc
             adc LEVEL
             sta LEVEL
             bcc advance_r
             inc LEVEL+1
-advance_r:  jmp NextLevel           
+advance_r:  jmp Level          
                                     
 ; Handle New Cell
 ; Check for several things upon entering a new cell
@@ -1047,7 +1052,7 @@ transcribe: ldy #$07
 ; plays the pitch      
 FXService:  lda FX_LEN          ; Has the sound been launched?
             beq fx_end          ; If unlaunched, kill voice and return
-            lda #$1a            ; Make sure sound effects are not affected by
+            lda #$0a            ; Make sure sound effects are not affected by
             sta VOLUME          ;   music player's volume changes
             dec FX_LEN          ; Decrement both length
             dec FX_COUNT        ;   and countdown
@@ -1157,15 +1162,15 @@ note_r:     rts
 ; DATA
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 Intro:      .asc $93,$0d,$0d,$0d,$0d,$1f
-            .asc     "   &**************,",$0d
-            .asc     "   %              %",$0d
-            .asc $1f,"   %  TROLLEY  Z  %",$0d
-            .asc     "   %              %",$0d
-            .asc     "   %  !  PROBLEM  %",$0d
-            .asc     "   %              %",$0d
-            .asc     "   #**************)",$0d
-            .asc $0d,$0d,"  2021@JASON JUSTIAN",$0d,$0d,$0d,$0d,$0d,$0d,$0d
-            .asc "     @PRESS FIRE@",$00
+            .asc     " &******************,",$0d
+            .asc     " %                  %",$0d
+            .asc $1f," %    TROLLEY  Z    %",$0d
+            .asc     " %                  %",$0d
+            .asc     " %    !  PROBLEM    %",$0d
+            .asc     " %                  %",$0d
+            .asc     " #******************)",$0d
+            .asc $0d,$0d,"  2021@JASON JUSTIAN",$0d,$0d,$0d,$0d,$0d
+            .asc "      PRESS FIRE",$00
 
 ; Manual Text            
 Manual:     .asc $93,$0d
@@ -1173,27 +1178,26 @@ Manual:     .asc $93,$0d
             .asc "   TROLLEY TO PICK UP",$0d,$0d
             .asc " ",$1c,"Z",$1f," RIDERS AND DROP",$0d
             .asc "   THEM OFF AT THE",$0d,$0d
-            .asc " ",$05,"!",$1f," DEPOT ON TIME",$0d,$0d,$0d
-            .asc " @FIRE  SELECT SWITCH",$0d,$0d
-            .asc " @LEFT  ",$9e,$5f,$1f," STRAIGHT",$0d,$0d
-            .asc " @RIGHT ",$9e,"[",$1f, " TURN",$0d,$0d
-            .asc " @UP    FASTER",$0d,$0d
-            .asc " @DOWN  SLOWER",$0d,$0d,$0d
-            .asc " MAX RIDERS ",$1c,$5d,$5d,$5d,$5d,$00
+            .asc " ",$05,"!",$1f," DEPOT ON TIME",$0d,$0d
+            .asc "   MAX RIDERS ",$1c,$5d,$5d,$5d,$5d,$1f,$0d,$0d
+            .asc "&******CONTROLS*******%",$0d
+            .asc "%@FIRE  SELECT SWITCH",$0d,"%",$0d
+            .asc "%@LEFT  ",$9e,$5f,$1f," STRAIGHT",$0d,"%",$0d
+            .asc "%@RIGHT ",$9e,"[",$1f, " TURN",$0d,"%",$0d
+            .asc "%@UP    FASTER",$0d,"%",$0d
+            .asc "%@DOWN  SLOWER",$0d,")",$00
 
 ; Game Text
 ScoreTx:    .asc $11,$1f,"   TROLLEY  PROBLEM",$0d
-            .asc $90," LV SCORE TIME RIDERS",$00
+            .asc $90," LV@SCORE@TIME@RIDERS",$00
 ScoreBar:   .asc $13,$11,$11,$11,"  ",$90,$00
-GameOverTx: .asc $13,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11
-            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d
-            .asc $90,"&******,",$0d
-            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d
-            .asc "%",$1f," GAME ",$90,"%",$0d
-            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d
-            .asc "%",$1f," OVER ",$90,"%",$0d
-            .asc $1d,$1d,$1d,$1d,$1d,$1d,$1d
-            .asc "#******)",$00    
+GameOverTx: .asc $13,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11
+            .asc $1d,$1d,$1d,$1d
+            .asc $90,"&************,",$0d
+            .asc $1d,$1d,$1d,$1d
+            .asc "% TIME IS UP %",$0d
+            .asc $1d,$1d,$1d,$1d
+            .asc "#************)",$00    
 VictoryTx   .asc $13,$11,$9e,"       VICTORY",$1c,"Z     ",$00                   
 HiScoreTx:  .asc $13,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11
             .asc $11,$11,$11,$11,$11,$11,$11,$11,$11,"    HIGH SCORE ",$00
@@ -1216,6 +1220,7 @@ FXTable:    .byte $36,$12       ; 0- Passenger pickup
             .byte $05,$13       ; 2- Drop off passengers
             .byte $55,$12       ; 3- Bonus sound
             .byte $84,$11       ; 4- Next switch
+            .byte $d6,$76       ; 5- Victory tune
 
 ; Musical Themes
 Themes:     .word $5523
@@ -1246,6 +1251,9 @@ TrackTurn:  .byte $23, 0, 0, 2, 1   ; Curve E / N
             .byte $2e, 2,11, 0,11   ; S switchable            
             .byte $ff               ; End of table
 
+; Extra bytes for bug fixes, etc.
+pad3583:    .asc "JEJ/2021"
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LEVEL TABLE
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1261,69 +1269,70 @@ TrackTurn:  .byte $23, 0, 0, 2, 1   ; Curve E / N
 ;    * To get a proper passenger count, put the passengers at the end of the
 ;      data, using multiple $00s, if necessary
 Levels:
-Level1:     .byte $80,$00,$ff,$fe,$01,$02,$fd,$7a   ; Done
+Level1:     .byte $80,$00,$ff,$fe,$01,$02,$fd,$7a   ; Tested
             .byte $85,$4a,$bd,$4a,$a1,$4a,$af,$4a
             .byte $a9,$7a,$a9,$02,$af,$f2,$a1,$12
             .byte $bd,$12,$85,$fe,$84,$00,$fc,$00
             .byte $4d,$2d,$07,$78,$00,$00,$00,$00
             .byte $00,$00,$00,$00,$e8,$99,$93,$2a
 
-Level2:     .byte $7f,$c0,$40,$44,$e0,$44,$bc,$7e   ; Done
+Level2:     .byte $7f,$c0,$40,$44,$e0,$44,$bc,$7e   ; Tested
             .byte $e4,$52,$05,$52,$05,$d2,$3c,$12
             .byte $e1,$de,$87,$54,$f4,$77,$9c,$45
             .byte $94,$7d,$f4,$01,$14,$01,$1f,$ff
             .byte $56,$1e,$38,$7d,$ac,$b6,$00,$00
             .byte $00,$00,$00,$00,$ba,$b2,$62,$5f      
             
-Level3:     .byte $00,$00,$07,$f8,$04,$08,$1e,$0e   ; Done
+Level3:     .byte $00,$00,$07,$f8,$04,$08,$1e,$0e   ; Tested
             .byte $12,$0a,$3a,$0a,$aa,$0a,$fa,$0a
             .byte $22,$0a,$22,$0a,$22,$0a,$3f,$fa
             .byte $00,$22,$00,$22,$00,$22,$00,$3e
             .byte $6d,$3c,$63,$c6,$aa,$00,$00,$00
             .byte $47,$57,$67,$77,$8d,$c3,$c8,$ec
                         
-Level4:     .byte $fe,$ff,$82,$81,$82,$81,$83,$8f   ; Done
+Level4:     .byte $fe,$ff,$82,$81,$82,$81,$83,$8f   ; Tested
             .byte $82,$89,$82,$89,$fe,$ff,$10,$00
             .byte $10,$80,$fe,$ff,$82,$89,$82,$89
             .byte $83,$8f,$82,$81,$82,$81,$fe,$ff
             .byte $29,$3c,$35,$7c,$8c,$a3,$c9,$00
             .byte $00,$00,$c1,$bd,$a5,$5a,$54,$4d          
 
-Level5:     .byte $80,$00,$e0,$7f,$3c,$41,$27,$c1   ; Done
+Level5:     .byte $80,$00,$ff,$bf,$08,$a1,$08,$a1   ; Tested
+            .byte $0f,$ff,$f8,$28,$8f,$ff,$e9,$29
+            .byte $29,$29,$2f,$af,$20,$e8,$3f,$ae
+            .byte $20,$22,$ff,$fe,$a4,$02,$e7,$fe
+            .byte $06,$24,$55,$3c,$9b,$b1,$c5,$04
+            .byte $00,$00,$00,$00,$00,$00,$00,$df
+
+
+Level6:     .byte $80,$00,$e0,$7f,$3c,$41,$27,$c1   ; Tested
             .byte $e4,$4f,$bc,$49,$93,$e9,$9e,$39
             .byte $82,$21,$fe,$39,$03,$e9,$01,$09
             .byte $3f,$09,$20,$09,$3f,$ff,$00,$00
             .byte $8e,$50,$43,$79,$97,$fc,$00,$bd
             .byte $34,$44,$0c,$81,$99,$a4,$d4,$da 
                         
-Level6:     .byte $80,$00,$ff,$ff,$48,$89,$48,$89   ; Done
+Level7:     .byte $80,$00,$ff,$ff,$48,$89,$48,$89   ; Tested
             .byte $48,$99,$4f,$f1,$44,$91,$45,$d1
             .byte $7f,$7f,$05,$d0,$04,$90,$0f,$f0
             .byte $08,$90,$0f,$f0,$02,$80,$03,$80
             .byte $eb,$38,$04,$08,$0c,$88,$00,$2d
             .byte $47,$42,$a6,$7e,$96,$9a,$c5,$29
 
-Level7:     .byte $42,$21,$42,$23,$43,$fe,$ff,$1a   ; Done
+Level8:     .byte $42,$21,$42,$23,$43,$fe,$ff,$1a   ; Tested
             .byte $82,$1a,$f6,$1a,$15,$1a,$17,$fe
             .byte $f7,$c2,$94,$1f,$97,$f9,$f2,$8f
             .byte $9e,$f8,$92,$e8,$92,$28,$f3,$f8
             .byte $66,$3c,$84,$8b,$8c,$c7,$00,$a2
             .byte $25,$cd,$98,$e9,$8f,$5d,$41,$3a
 
-Level8:     .byte $7f,$ff,$40,$81,$5d,$dd,$77,$75   ; Done
+Level9:     .byte $7f,$ff,$40,$81,$5d,$dd,$77,$75   ; Tested
             .byte $1d,$dd,$08,$01,$1d,$dd,$95,$57
             .byte $fd,$dc,$08,$88,$08,$88,$1d,$dc
             .byte $77,$54,$5d,$dc,$40,$08,$7f,$f8
             .byte $e0,$40,$34,$38,$3c,$74,$78,$7c
             .byte $c4,$c8,$cc,$00,$41,$46,$99,$9d
                         
-Level9:     .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $00,$00,$80,$00,$ff,$c0,$04,$40
-            .byte $04,$40,$07,$c8,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $8a,$14,$11,$00,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$57,$58
-
 Level10:    .byte $00,$00,$00,$00,$00,$00,$00,$00
             .byte $00,$00,$80,$00,$ff,$c0,$04,$40
             .byte $04,$40,$07,$c8,$00,$00,$00,$00
@@ -1336,14 +1345,14 @@ Level11:    .byte $00,$00,$00,$00,$00,$00,$00,$00
             .byte $04,$40,$07,$c8,$00,$00,$00,$00
             .byte $00,$00,$00,$00,$00,$00,$00,$00
             .byte $8a,$14,$11,$00,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$57,$58
-
-Level12:    .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $00,$00,$80,$00,$ff,$c0,$04,$40
-            .byte $04,$40,$07,$c8,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $8a,$14,$11,$00,$00,$00,$00,$00
             .byte $00,$00,$00,$00,$00,$00,$57,$58            
+
+Level12:    .byte $f1,$f8,$91,$0f,$ff,$c9,$10,$49   ; Tested
+            .byte $10,$49,$f0,$4f,$90,$48,$92,$e8
+            .byte $93,$b8,$fc,$e8,$54,$48,$5f,$c8
+            .byte $e8,$7f,$a8,$09,$af,$f9,$e0,$0f
+            .byte $4e,$78,$54,$5b,$89,$8d,$ed,$00
+            .byte $d3,$de,$a6,$71,$4a,$34,$2e,$06
             
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; CUSTOM CHARACTER SET
@@ -1357,7 +1366,7 @@ Level12:    .byte $00,$00,$00,$00,$00,$00,$00,$00
 ; a reliable method as long as you don't add anything AFTER this
 ; character data.
 ;
-CharSet:    .byte $00,$00,$00,$38,$38,$38,$00,$00 ; Placeholder (+)
+CharSet:    .byte $00,$00,$00,$18,$18,$00,$00,$00 ; Placeholder
             .byte $00,$3c,$18,$24,$42,$7e,$46,$42 ; A
             .byte $00,$7c,$22,$3c,$22,$22,$22,$7c ; B
             .byte $00,$1a,$26,$42,$40,$40,$22,$1c ; C
