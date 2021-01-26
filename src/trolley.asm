@@ -676,27 +676,6 @@ flip:       lda C_SWITCH+1
             eor #$88
             sta C_SWITCH+1
             rts            
-
-; Pick up Passenger
-Pickup:     jsr MoveCursor      ; Move cursor to where the passenger is
-            ldy #$00            ; If there's room on the trolley, pick up
-            lda #$20            ;   the passenger by incrementing the riding
-            sta (CURSOR),y      ;   count and decrementing the waiting count
-            inc RIDING          ;   ,,
-            dec WAITING         ;   ,,
-            lda #PICKUP         ; Add score for the pickup
-            jsr AddScore        ; ,,
-            lda #PASSENGER      ; Add a passenger to the display
-            ldy RIDING          ; ,,
-            sta $1e50,y         ; ,,
-            lda #$02            ; Add the color
-            sta $9650,y         ; ,,
-            lda #$00            ; Launch sound effect for pickup
-            jsr FXLaunch        ; ,,
-            lda #$01            ; Flip the low shift register music bit on
-            eor THEME           ;   each pickup
-            sta THEME           ;   ,,
-            rts
        
 ; Game Over            
 GameOver:   lda #<GameOverTx    ; Show Game Over text
@@ -720,6 +699,31 @@ Victory:    jsr ShowScore       ; Show final score
 retry:      jsr Wait4Fire       ; If the fire button is pressed here,
             jsr InitCont        ;   retry the current level
             jmp Level           ;   ,,
+
+; Pick up Rider
+; If there's enough space on the trolley
+Pickup:     lda RIDING          ; Is there any more room on the trolley?
+            cmp #MAX_PASS       ; ,,
+            bcs pickup_r        ; If not, return to HandleCell
+            jsr MoveCursor      ; Move cursor to where the rider is
+            ldy #$00            ; Clear out the waiting rider with a space
+            lda #$20            ; ,,
+            sta (CURSOR),y      ; ,,
+            inc RIDING          ; Increment the riding counter and
+            dec WAITING         ; Decrement the waiting counter
+            lda #PICKUP         ; Add score for the pickup
+            jsr AddScore        ; ,,
+            lda #PASSENGER      ; Add a rider to the "riders" display
+            ldy RIDING          ; ,,
+            sta $1e50,y         ; ,,
+            lda #$02            ; Add the color
+            sta $9650,y         ; ,,
+            lda #$00            ; Launch sound effect for pickup
+            jsr FXLaunch        ; ,,
+            lda #$01            ; Flip the low shift register music bit on
+            eor THEME           ;   each pickup so that the music changes
+            sta THEME           ;   ,,
+pickup_r:   rts
             
 ; Check Adjacent Cells
 Adjacent:   lda WAVING+3        ; A couple graphical tasks on each
@@ -742,12 +746,8 @@ Adjacent:   lda WAVING+3        ; A couple graphical tasks on each
             sec                 ;   ,,
             ror SWITCH_FL       ;   ,,
             rts
-ch_pass:    cmp #PASS1          ; If it's a passenger, check how many riders
-            bne ch_depot        ;   are currently onboard. If it's less than
-            lda RIDING          ;   the maximum, allow a new rider aboard
-            cmp #MAX_PASS       ;   ,,
-            bcs ch_depot        ;   ,,
-            jmp Pickup          ;   ,,
+ch_pass:    cmp #PASS1          ; If it's a rider, pick it up (maybe)
+            beq Pickup          ; ,,
 ch_depot:   cmp #DEPOT          ; If it's the depot, clear the trolley and
             bne ch_start        ;   increase the score
             ldy RIDING          ; How many riders?
@@ -1255,7 +1255,7 @@ TrackTurn:  .byte $23, 0, 0, 2, 1   ; Curve E / N
             .byte $ff               ; End of table
 
 ; Extra bytes for bug fixes, etc.
-pad3583:    .asc "JJ"
+pad3583:    .asc "JEJ21"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LEVEL TABLE
@@ -1311,8 +1311,8 @@ Level6:     .byte $80,$00,$ff,$bf,$08,$a1,$08,$a1   ; Tested
             .byte $0f,$ff,$f8,$28,$8f,$ff,$e9,$29
             .byte $29,$29,$2f,$af,$20,$e8,$3f,$ae
             .byte $20,$22,$ff,$fe,$a4,$02,$e7,$fe
-            .byte $06,$24,$55,$3c,$9b,$b1,$c5,$04
-            .byte $00,$00,$00,$00,$00,$00,$00,$df
+            .byte $36,$20,$55,$3c,$9b,$b1,$c5,$04
+            .byte $43,$00,$00,$00,$00,$00,$00,$df
 
 Level7:     .byte $80,$00,$e0,$7f,$3c,$41,$27,$c1   ; Tested
             .byte $e4,$4f,$bc,$49,$93,$e9,$9e,$39
@@ -1330,7 +1330,7 @@ Level8:     .byte $80,$00,$ff,$ff,$48,$89,$48,$89   ; Tested
 
 Level9:     .byte $42,$21,$42,$23,$43,$fe,$ff,$1a   ; Tested
             .byte $82,$1a,$f6,$1a,$15,$1a,$17,$fe
-            .byte $f7,$c2,$94,$1f,$97,$f9,$f2,$8f
+            .byte $f7,$c2,$94,$1f,$97,$fd,$f2,$8f
             .byte $9e,$f8,$92,$e8,$92,$28,$f3,$f8
             .byte $66,$3c,$84,$8b,$8c,$c7,$00,$a2
             .byte $25,$cd,$98,$e9,$8f,$5d,$41,$3a
@@ -1342,18 +1342,18 @@ Level10:    .byte $7f,$ff,$40,$81,$5d,$dd,$77,$75   ; Tested
             .byte $e0,$40,$34,$38,$3c,$74,$78,$7c
             .byte $c4,$c8,$cc,$00,$4a,$46,$99,$9d
                         
-Level11:    .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $00,$00,$80,$00,$ff,$c0,$04,$40
-            .byte $04,$40,$07,$c8,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $8a,$14,$11,$00,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$57,$58            
+Level11:    .byte $00,$00,$07,$00,$0d,$80,$18,$c0   ; Tested
+            .byte $37,$60,$25,$2e,$27,$eb,$21,$29
+            .byte $a1,$2b,$ff,$fe,$14,$50,$16,$58
+            .byte $12,$48,$1e,$78,$00,$00,$00,$00
+            .byte $6d,$32,$6b,$83,$89,$a2,$aa,$00
+            .byte $78,$9f,$cb,$c5,$59,$56,$53,$26         
 
 Level12:    .byte $f1,$f8,$91,$0f,$ff,$c9,$10,$49   ; Tested
             .byte $10,$49,$f0,$4f,$90,$48,$92,$e8
             .byte $93,$b8,$fc,$e8,$54,$48,$5f,$c8
             .byte $e8,$7f,$a8,$09,$af,$f9,$e0,$0f
-            .byte $4e,$78,$54,$5b,$89,$8d,$ed,$00
+            .byte $4e,$60,$54,$5b,$89,$8d,$ed,$00
             .byte $d3,$de,$a6,$71,$4a,$34,$2e,$06
             
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
