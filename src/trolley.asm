@@ -182,13 +182,14 @@ Main:       bit MOVE_FL         ; If move flag is set, move the trolley
             lda TIME            ; Check for timer elapsed
             bpl timer_disp      ; ,,
 end_level:  jmp GameOver        ; ,,
-            ;jmp DIAGNOSTIC     ; Comment previous, uncomment this
 timer_disp: bit TIMER_FL        ; If the timer flag is set, show the score
             bpl ch_stop         ; ,,
             jsr ShowScore       ; ,,
             lsr TIMER_FL        ; Clear the timer flag
-ch_stop:    jsr ISCNTC          ; End level if STOP key is pressed
-            beq end_level       ; ,,        
+ch_stop:    jsr ISCNTC          ; Restart level if STOP key is pressed
+            bne read_js         ; ,,
+            jmp retry           ; ,,
+            ;jmp DIAGNOSTIC     ; Comment previous, uncomment this
 read_js:    jsr Joystick        ; Read the joystick
             beq Main            ; If no movement do nothing
 ch_fire:    cmp #FIRE           ; Has fire been pressed?
@@ -464,7 +465,7 @@ InitGame:   lda #SCRCOLVAL      ; Set background color
             sta LEVEL+1         ; ,,
             lda #$01            ; Starting level number of new game
             sta LEVEL_NUM       ; ,,
-InitCont:   lda #$00            ; Set the theme
+InitRetry:  lda #$00            ; Set the theme
             sta FX_LEN          ;   and effects length
             sta SCORE           ;   and score
             sta SCORE+1         ;   ,,
@@ -681,6 +682,8 @@ flip:       lda C_SWITCH+1
 GameOver:   lda #<GameOverTx    ; Show Game Over text
             ldy #>GameOverTx    ; ,,
             jsr PRTSTR          ; ,,
+            lda #$0a            ; Fade out music at end of game
+            sta FADE            ; ,,
 Victory:    jsr ShowScore       ; Show final score    
             lda #<HiScoreTx     ; Show High Score text
             ldy #>HiScoreTx     ; ,,
@@ -688,16 +691,14 @@ Victory:    jsr ShowScore       ; Show final score
             ldx HISCORE         ; Show the high score
             lda HISCORE+1       ; ,,
             jsr PRTFIX          ; ,,            
-            lda #$0a            ; Fade out music at end of game
-            sta FADE            ; ,,
-            lda #$80            ; Delay for fade-out
+            lda #$80            ; Delay for fade-out or victory music
             jsr Delay           ; ,,
             lsr PLAY_FL         ; Stop the play
             bit VICTORY_FL      ; Has the player won the game?
-            bpl retry           ; If not, then fire retries the same level
-            jmp Start           ; Otherwise, fire restarts the game
-retry:      jsr Wait4Fire       ; If the fire button is pressed here,
-            jsr InitCont        ;   retry the current level
+            bpl retry_wait      ;   If not, then fire retries the same level
+            jmp Start           ;   If so, fire restarts the game from level 1
+retry_wait: jsr Wait4Fire       ; If the fire button is pressed here,
+retry:      jsr InitRetry       ;   retry the current level
             jmp Level           ;   ,,
 
 ; Pick up Rider
@@ -1255,7 +1256,7 @@ TrackTurn:  .byte $23, 0, 0, 2, 1   ; Curve E / N
             .byte $ff               ; End of table
 
 ; Extra bytes for bug fixes, etc.
-pad3583:    .asc "JEJ21"
+pad3583:    .asc "JJ"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LEVEL TABLE
