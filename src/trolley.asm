@@ -36,17 +36,17 @@ FIRE        = $05               ; Joystick fire button pressed
 DEF_SPEED   = 7                 ; Default speed
 MAX_SPEED   = 3                 ; Maximum speed
 MIN_SPEED   = 9                 ; Minimum speed
-MAX_PASS    = 4                 ; Maximum passengers on trolley
+MAX_RIDERS  = 4                 ; Maximum riders on trolley
 TR_COLOR    = 6                 ; Track/Trolley color
 
 ; Score constants
-PICKUP      = 10                ; Score when a passenger is picked up
-DROPOFF     = 50                ; Score when a passenger is dropped off
+PICKUP      = 10                ; Score when a rider is picked up
+DROPOFF     = 50                ; Score when a rider is dropped off
 TIME_BONUS  = 5                 ; Time bonus
 
 ; Character constants
-PASS1       = $1a
-PASSENGER   = $1d
+W_RIDER     = $1a               ; Waiting rider
+A_RIDER     = $1d               ; Aboard rider
 SWITCH_OFF  = $1f
 SWITCH_ON   = $1b
 BUILDING    = $1e
@@ -100,8 +100,8 @@ JOYREG      = $fe               ; Joystick register storage
 TRMASK      = $fe               ; [LEVEL DRAW] Track mask
 SCORE       = $45               ; Score (2 bytes)
 PLAY_FL     = $49               ; Play flag (determines behavior of ISR)
-WAITING     = $02               ; Passengers waiting
-RIDING      = $03               ; Passenger Count
+WAITING     = $02               ; Number of riders waiting
+RIDING      = $03               ; Rider Count
 DIR         = $04               ; Tolley direction
 TIME        = $05               ; Time remaining (seconds)
 UNDER_D     = $06               ; Character at trolley destination
@@ -601,17 +601,17 @@ check_end2: lda CURSOR+1        ; Have we reached the end of the screen?
             ; Fall through to AddPieces
 
 ; Add Pieces to Board
-; Switches and Passengers
+; Switches and Riders
 AddPieces:  ldy #$22            ; Start adding pieces after track data
             ldx #SWITCH_OFF     ; First section is switch location data
 -loop:      tya                 ; So we don't need to worry about Y in
             pha                 ;   PlaceChar
             lda (LEVEL),y       ; Get piece
             bne place           ; If the position is 0, change from
-            ldx #PASS1          ;   switches to passengers
+            ldx #W_RIDER        ;   switches to riders
             sta WAITING         ; Reset waiting count
             bne next_piece
-place:      inc WAITING         ; Count waiting passengers
+place:      inc WAITING         ; Count waiting riders
             jsr PlaceChar       ; Place character
 next_piece: pla
             tay
@@ -704,7 +704,7 @@ retry:      jsr InitRetry       ;   retry the current level
 ; Pick up Rider
 ; If there's enough space on the trolley
 Pickup:     lda RIDING          ; Is there any more room on the trolley?
-            cmp #MAX_PASS       ; ,,
+            cmp #MAX_RIDERS     ; ,,
             bcs pickup_r        ; If not, return to HandleCell
             jsr MoveCursor      ; Move cursor to where the rider is
             ldy #$00            ; Clear out the waiting rider with a space
@@ -714,7 +714,7 @@ Pickup:     lda RIDING          ; Is there any more room on the trolley?
             dec WAITING         ; Decrement the waiting counter
             lda #PICKUP         ; Add score for the pickup
             jsr AddScore        ; ,,
-            lda #PASSENGER      ; Add a rider to the "riders" display
+            lda #A_RIDER        ; Add a rider to the "riders" display
             ldy RIDING          ; ,,
             sta $1e50,y         ; ,,
             lda #$02            ; Add the color
@@ -729,7 +729,7 @@ pickup_r:   rts
 ; Check Adjacent Cells
 Adjacent:   lda WAVING+3        ; A couple graphical tasks on each
             eor #$40            ;   movement. First, change some bits in the
-            sta WAVING+3        ;   waiting passenger character so that
+            sta WAVING+3        ;   waiting rider character so that
             lda WAVING+4        ;   they look like they're waving
             eor #$40            ;   ,,
             sta WAVING+4        ;   ,,
@@ -743,11 +743,11 @@ Adjacent:   lda WAVING+3        ; A couple graphical tasks on each
             ldx #WEST           ; Start with WEST and go counterclockwise
 -loop:      jsr GetChar         ; Get charater in the X direction
             cmp #SWITCH_ON      ; If it's a switch that's turned on, set the
-            bne ch_pass         ;   switch on flag
+            bne ch_rider        ;   switch on flag
             sec                 ;   ,,
             ror SWITCH_FL       ;   ,,
             rts
-ch_pass:    cmp #PASS1          ; If it's a rider, pick it up (maybe)
+ch_rider:   cmp #W_RIDER        ; If it's a rider, pick it up (maybe)
             beq Pickup          ; ,,
 ch_depot:   cmp #DEPOT          ; If it's the depot, clear the trolley and
             bne ch_start        ;   increase the score
@@ -825,10 +825,10 @@ advance_r:  jmp Level
                                     
 ; Handle New Cell
 ; Check for several things upon entering a new cell
-;   * Pick up new passengers
-;   * Drop off passengers at depot
+;   * Pick up new riders
+;   * Drop off riders at depot
 ;   * Change direction based on tracks and switches
-HandleCell: jsr Adjacent        ; Handle passengers, depot, switches  
+HandleCell: jsr Adjacent        ; Handle riders, depot, switches  
 srch_track: ldy #$00            ; Search track for table entry
 -loop:      lda TrackTurn,y
             bmi PrepMove        ; End search if table ends
@@ -1219,9 +1219,9 @@ JoyTable:   .byte 0,$04,$80,$08,$10,$20            ; Corresponding direction bit
 ;   (3) High nybble of the second byte (L) is the length in jiffies x 16
 ;       * Between approx. 1/4 sec and 4 sec in length
 ;   (4) Low nybble of second byte (S) is speed in jiffies
-FXTable:    .byte $36,$12       ; 0- Passenger pickup
+FXTable:    .byte $36,$12       ; 0- Rider pickup
             .byte $7f,$11       ; 1- Switch Switch
-            .byte $05,$13       ; 2- Drop off passengers
+            .byte $05,$13       ; 2- Drop off riders
             .byte $55,$12       ; 3- Bonus sound
             .byte $84,$11       ; 4- Next switch
             .byte $d6,$76       ; 5- Victory tune
@@ -1265,12 +1265,12 @@ pad3583:    .asc "JJ"
 ; 32 bytes represent a 16x16 character grid for track placeholders
 ;  1 byte specifies the coordinates of the goal depot
 ;  1 byte specifies the level time limit in seconds
-; 14 bytes specify the locations of switches and passengers
+; 14 bytes specify the locations of switches and riders
 ;    Switches are first, and all entries are switches until $00 is reached
-;    Then, the rest of the entries are passengers
-;    * So, the sum of passengers + switches is 13
+;    Then, the rest of the entries are riders
+;    * So, the sum of riders + switches is 13
 ;    * The coordinate format is Y,X
-;    * To get a proper passenger count, put the passengers at the end of the
+;    * To get a proper rider count, put the riders at the end of the
 ;      data, using multiple $00s, if necessary
 Levels:
 Level1:     .byte $80,$00,$ff,$fe,$01,$02,$fd,$7a   ; Tested
@@ -1280,20 +1280,20 @@ Level1:     .byte $80,$00,$ff,$fe,$01,$02,$fd,$7a   ; Tested
             .byte $4d,$2d,$07,$78,$00,$00,$00,$00
             .byte $00,$00,$00,$00,$e8,$99,$93,$2a
   
-Level2:     .byte $00,$00,$07,$f8,$04,$08,$1e,$0e   ; Tested
+Level2:     .byte $80,$00,$c0,$00,$7f,$ff,$40,$01   ; Tested
+            .byte $5e,$fd,$52,$85,$7a,$85,$4e,$e5
+            .byte $40,$25,$5f,$a5,$50,$a5,$78,$ad
+            .byte $4f,$b9,$40,$09,$7f,$ff,$00,$00
+            .byte $12,$40,$60,$b0,$fc,$00,$00,$00
+            .byte $00,$00,$00,$00,$b6,$8b,$59,$55 
+              
+Level3:     .byte $00,$00,$07,$f8,$04,$08,$1e,$0e   ; Tested
             .byte $12,$0a,$3a,$0a,$aa,$0a,$fa,$0a
             .byte $22,$0a,$22,$0a,$22,$0a,$3f,$fa
             .byte $00,$22,$00,$22,$00,$22,$00,$3e
             .byte $6d,$3c,$63,$c6,$aa,$00,$00,$00
             .byte $47,$57,$67,$77,$8d,$c3,$c8,$ec
-                                
-Level3:     .byte $80,$00,$c0,$00,$7f,$ff,$40,$01   ; Tested
-            .byte $5e,$fd,$52,$85,$7a,$85,$4e,$e5
-            .byte $40,$25,$5f,$a5,$50,$a5,$78,$ad
-            .byte $4f,$b9,$40,$09,$7f,$ff,$00,$00
-            .byte $12,$40,$60,$b0,$fc,$00,$00,$00
-            .byte $00,$00,$00,$00,$b6,$8b,$59,$55            
-            
+                                           
 Level4:     .byte $00,$00,$00,$00,$80,$00,$e0,$00   ; Tested
             .byte $20,$00,$ff,$ff,$a0,$21,$e0,$21
             .byte $80,$21,$ff,$ff,$20,$01,$20,$01
@@ -1396,10 +1396,10 @@ CharSet:    .byte $00,$00,$00,$18,$18,$00,$00,$00 ; Placeholder
             .byte $00,$42,$62,$34,$18,$2c,$46,$42 ; X
             .byte $00,$42,$62,$34,$18,$18,$18,$3c ; Y
 ;           .byte $00,$7e,$46,$0c,$18,$30,$62,$7e ; Z
-WAVING:     .byte $00,$18,$18,$40,$3c,$1c,$18,$18 ; Passenger - Waving  ($1a)
+WAVING:     .byte $00,$18,$18,$40,$3c,$1c,$18,$18 ; Waiting Rider       ($1a)
             .byte $00,$02,$04,$08,$10,$38,$7c,$7c ; Switch on/turn      ($1b)
             .byte $3c,$7e,$7e,$7e,$7e,$7e,$3e,$00 ; Trolley N-S         ($1c)
-            .byte $00,$18,$18,$00,$3c,$3c,$18,$18 ; Passenger           ($1d)
+            .byte $00,$18,$18,$00,$3c,$3c,$18,$18 ; Rider               ($1d)
             .byte $00,$78,$48,$7e,$4a,$7e,$6a,$ff ; Building            ($1e)
             .byte $00,$10,$10,$10,$10,$38,$7c,$7c ; Switch off/straight ($1f)
             .byte $00,$00,$00,$00,$00,$00,$00,$00 ; Space               ($20)
