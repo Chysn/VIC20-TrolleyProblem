@@ -753,6 +753,9 @@ ch_depot:   cmp #DEPOT          ; If it's the depot, clear the trolley and
             ldy RIDING          ; How many riders?
             beq next_adj        ; If none, back to loop
             jsr MStop           ; Stop music during dropoff
+            lda #DEF_SPEED      ; Set starting speed after dropoff
+            sta SPEED           ; ,,
+            sta SPEED_COUNT     ; ,,
 -loop2:     lda #$20            ; Replace a rider with a space
             sta $1e50,y         ; ,,
             tya                 ; Preserve iterator
@@ -1180,7 +1183,7 @@ Manual:     .asc $93,$0d
             .asc "   THEM OFF AT THE",$0d,$0d
             .asc " ",$05,"!",$1f," DEPOT ON TIME",$0d,$0d
             .asc "   MAX RIDERS ",$1c,$5d,$5d,$5d,$5d,$1f,$0d,$0d
-            .asc "&******CONTROLS*******%",$0d
+            .asc "&***** CONTROLS ******%",$0d
             .asc "%@FIRE  SELECT SWITCH",$0d,"%",$0d
             .asc "%@LEFT  ",$9e,$5f,$1f," STRAIGHT",$0d,"%",$0d
             .asc "%@RIGHT ",$9e,"[",$1f, " TURN",$0d,"%",$0d
@@ -1252,7 +1255,7 @@ TrackTurn:  .byte $23, 0, 0, 2, 1   ; Curve E / N
             .byte $ff               ; End of table
 
 ; Extra bytes for bug fixes, etc.
-pad3583:    .asc "JEJ/2021"
+pad3583:    .asc "JJ"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LEVEL TABLE
@@ -1275,71 +1278,70 @@ Level1:     .byte $80,$00,$ff,$fe,$01,$02,$fd,$7a   ; Tested
             .byte $bd,$12,$85,$fe,$84,$00,$fc,$00
             .byte $4d,$2d,$07,$78,$00,$00,$00,$00
             .byte $00,$00,$00,$00,$e8,$99,$93,$2a
-
-Level2:     .byte $7f,$c0,$40,$44,$e0,$44,$bc,$7e   ; Tested
-            .byte $e4,$52,$05,$52,$05,$d2,$3c,$12
-            .byte $e1,$de,$87,$54,$f4,$77,$9c,$45
-            .byte $94,$7d,$f4,$01,$14,$01,$1f,$ff
-            .byte $56,$1e,$38,$7d,$ac,$b6,$00,$00
-            .byte $00,$00,$00,$00,$ba,$b2,$62,$5f      
-            
-Level3:     .byte $00,$00,$07,$f8,$04,$08,$1e,$0e   ; Tested
+  
+Level2:     .byte $00,$00,$07,$f8,$04,$08,$1e,$0e   ; Tested
             .byte $12,$0a,$3a,$0a,$aa,$0a,$fa,$0a
             .byte $22,$0a,$22,$0a,$22,$0a,$3f,$fa
             .byte $00,$22,$00,$22,$00,$22,$00,$3e
             .byte $6d,$3c,$63,$c6,$aa,$00,$00,$00
             .byte $47,$57,$67,$77,$8d,$c3,$c8,$ec
-                        
-Level4:     .byte $fe,$ff,$82,$81,$82,$81,$83,$8f   ; Tested
-            .byte $82,$89,$82,$89,$fe,$ff,$10,$00
-            .byte $10,$80,$fe,$ff,$82,$89,$82,$89
-            .byte $83,$8f,$82,$81,$82,$81,$fe,$ff
-            .byte $29,$3c,$35,$7c,$8c,$a3,$c9,$00
-            .byte $00,$00,$c1,$bd,$a5,$5a,$54,$4d          
+                                
+Level3:     .byte $80,$00,$c0,$00,$7f,$ff,$40,$01   ; Tested
+            .byte $5e,$fd,$52,$85,$7a,$85,$4e,$e5
+            .byte $40,$25,$5f,$a5,$50,$a5,$78,$ad
+            .byte $4f,$b9,$40,$09,$7f,$ff,$00,$00
+            .byte $12,$40,$60,$b0,$fc,$00,$00,$00
+            .byte $00,$00,$00,$00,$b6,$8b,$59,$55            
+            
+Level4:     .byte $00,$00,$00,$00,$80,$00,$e0,$00   ; Tested
+            .byte $20,$00,$ff,$ff,$a0,$21,$e0,$21
+            .byte $80,$21,$ff,$ff,$20,$01,$20,$01
+            .byte $20,$01,$3f,$ff,$00,$00,$00,$00
+            .byte $61,$3c,$4a,$82,$aa,$00,$00,$00
+            .byte $00,$00,$ec,$e8,$e4,$4c,$48,$44  
+             
+Level5:     .byte $80,$00,$ff,$f0,$10,$10,$30,$18   ; Tested
+            .byte $67,$ec,$4d,$36,$4b,$d2,$4a,$5e
+            .byte $4e,$52,$4b,$d2,$4d,$32,$67,$e6
+            .byte $31,$8c,$19,$98,$0f,$f0,$00,$00
+            .byte $78,$5a,$37,$7f,$87,$f8,$00,$39
+            .byte $3d,$63,$70,$77,$88,$c9,$ce,$e3                                
 
-Level5:     .byte $80,$00,$ff,$bf,$08,$a1,$08,$a1   ; Tested
+Level6:     .byte $80,$00,$ff,$bf,$08,$a1,$08,$a1   ; Tested
             .byte $0f,$ff,$f8,$28,$8f,$ff,$e9,$29
             .byte $29,$29,$2f,$af,$20,$e8,$3f,$ae
             .byte $20,$22,$ff,$fe,$a4,$02,$e7,$fe
             .byte $06,$24,$55,$3c,$9b,$b1,$c5,$04
             .byte $00,$00,$00,$00,$00,$00,$00,$df
 
-
-Level6:     .byte $80,$00,$e0,$7f,$3c,$41,$27,$c1   ; Tested
+Level7:     .byte $80,$00,$e0,$7f,$3c,$41,$27,$c1   ; Tested
             .byte $e4,$4f,$bc,$49,$93,$e9,$9e,$39
             .byte $82,$21,$fe,$39,$03,$e9,$01,$09
             .byte $3f,$09,$20,$09,$3f,$ff,$00,$00
             .byte $8e,$50,$43,$79,$97,$fc,$00,$bd
             .byte $34,$44,$0c,$81,$99,$a4,$d4,$da 
                         
-Level7:     .byte $80,$00,$ff,$ff,$48,$89,$48,$89   ; Tested
+Level8:     .byte $80,$00,$ff,$ff,$48,$89,$48,$89   ; Tested
             .byte $48,$99,$4f,$f1,$44,$91,$45,$d1
             .byte $7f,$7f,$05,$d0,$04,$90,$0f,$f0
             .byte $08,$90,$0f,$f0,$02,$80,$03,$80
             .byte $eb,$38,$04,$08,$0c,$88,$00,$2d
             .byte $47,$42,$a6,$7e,$96,$9a,$c5,$29
 
-Level8:     .byte $42,$21,$42,$23,$43,$fe,$ff,$1a   ; Tested
+Level9:     .byte $42,$21,$42,$23,$43,$fe,$ff,$1a   ; Tested
             .byte $82,$1a,$f6,$1a,$15,$1a,$17,$fe
             .byte $f7,$c2,$94,$1f,$97,$f9,$f2,$8f
             .byte $9e,$f8,$92,$e8,$92,$28,$f3,$f8
             .byte $66,$3c,$84,$8b,$8c,$c7,$00,$a2
             .byte $25,$cd,$98,$e9,$8f,$5d,$41,$3a
 
-Level9:     .byte $7f,$ff,$40,$81,$5d,$dd,$77,$75   ; Tested
+Level10:    .byte $7f,$ff,$40,$81,$5d,$dd,$77,$75   ; Tested
             .byte $1d,$dd,$08,$01,$1d,$dd,$95,$57
             .byte $fd,$dc,$08,$88,$08,$88,$1d,$dc
             .byte $77,$54,$5d,$dc,$40,$08,$7f,$f8
             .byte $e0,$40,$34,$38,$3c,$74,$78,$7c
-            .byte $c4,$c8,$cc,$00,$41,$46,$99,$9d
+            .byte $c4,$c8,$cc,$00,$4a,$46,$99,$9d
                         
-Level10:    .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $00,$00,$80,$00,$ff,$c0,$04,$40
-            .byte $04,$40,$07,$c8,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$00,$00
-            .byte $8a,$14,$11,$00,$00,$00,$00,$00
-            .byte $00,$00,$00,$00,$00,$00,$57,$58
-
 Level11:    .byte $00,$00,$00,$00,$00,$00,$00,$00
             .byte $00,$00,$80,$00,$ff,$c0,$04,$40
             .byte $04,$40,$07,$c8,$00,$00,$00,$00
