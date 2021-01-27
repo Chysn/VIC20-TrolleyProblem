@@ -99,7 +99,7 @@ COLUMN      = $fd               ; [LEVEL DRAW] Column number
 JOYREG      = $fe               ; Joystick register storage
 TRMASK      = $fe               ; [LEVEL DRAW] Track mask
 SCORE       = $45               ; Score (2 bytes)
-PLAY_FL     = $49               ; Play flag (determines behavior of ISR)
+GAME_FL     = $49               ; Play flag (determines behavior of ISR)
 WAITING     = $02               ; Number of riders waiting
 RIDING      = $03               ; Rider Count
 DIR         = $04               ; Tolley direction
@@ -135,7 +135,7 @@ FX_SPEED    = $a8               ; Effect countdown reset value
 THEME       = $26               ; Music shift register theme (2 bytes)
 TEMPO       = $28               ; Tempo (lower numbers are faster)
 MUCD        = $29               ; Tempo countdown
-MUSIC_F     = $2a               ; Music is playing
+PLAY_FL     = $2a               ; Music is playing
 FADE        = $2b               ; Fadeout volume
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -150,7 +150,7 @@ Startup:    jsr SetupHW         ; Set up hardware
 ; Show intro, set level, then show manual page      
 Welcome:    lda #SCRCOLVAL      ; Set background color
             sta SCRCOL          ; ,,
-            lsr PLAY_FL         ; Clear play flag in case we get here from NMI
+            lsr GAME_FL         ; Clear play flag in case we get here from NMI
             lda #$00            ; Shut off all sounds
             sta VOICEL          ; ,,
             sta VOICEM          ; ,,
@@ -194,39 +194,43 @@ read_js:    jsr Joystick        ; Read the joystick
             beq Main            ; If no movement do nothing
 ch_fire:    cmp #FIRE           ; Has fire been pressed?
             bne handle_dir      ; If not, handle a direction
-            jsr NextSwitch      ; If fire is pressed, toggle current switch
+            lda #$04            ; Launch next switch sound
+            jsr FXLaunch        ; ,,
+            jsr NextSwitch      ; If fire is pressed, move to the next switch
             jmp Main            ;   ,,
-handle_dir: cmp #NORTH
-            beq faster
-            cmp #SOUTH
-            beq slower
-            cmp #EAST
-            beq sw_on
-            cmp #WEST
-            bne Main
-sw_off:     lda #SWITCH_OFF
-            .byte $3c           ; Skip word
+handle_dir: cmp #NORTH          ; If joystick north, speed up the trolley
+            beq faster          ; ,,
+            cmp #SOUTH          ; If joystick south, slow down the trolley
+            beq slower          ; ,,
+            cmp #EAST           ; If joystick east, flip the switch to turn
+            beq sw_on           ; ,,
+            cmp #WEST           ; If joystick west, flip the switch back to
+            bne Main            ;   straight
+sw_off:     lda #SWITCH_OFF     ;   ,,
+            .byte $3c           ;   (SKW skip word)
 sw_on:      lda #SWITCH_ON
             ldx #$00
-            sta (C_SWITCH,x)
-            lda #$01            ; Launch switch effect
+            cmp (C_SWITCH,x)    ; Has the switch changed?
+            beq Main            ; If not, no need to change or launch sound
+            sta (C_SWITCH,x)    ; ,,
+            lda #$01            ; Launch switch sound effect
             jsr FXLaunch        ; ,,
-            bne Main
-faster:     lda SPEED
-            cmp #MAX_SPEED
-            beq Main
-            dec SPEED
-            dec SPEED
-            bne Main
-slower:     lda SPEED
-            cmp #MIN_SPEED
-            beq Main
-            inc SPEED
-            inc SPEED
-            bne Main
+            bne Main            ; Back to Main
+faster:     lda SPEED           ; Speed up the trolley, if possible,
+            cmp #MAX_SPEED      ;   by decrementing the speed value. This is
+            beq Main            ;   the number of jiffies between movement of
+            dec SPEED           ;   one pixel. Every eight pixels, the trolley
+            dec SPEED           ;   looks around for actions it needs to take
+            bne Main            ;   ,,
+slower:     lda SPEED           ; Slow down the trolley, if possible. See
+            cmp #MIN_SPEED      ;   above for more info.
+            beq Main            ;   ,,
+            inc SPEED           ;   ,,
+            inc SPEED           ;   ,,
+            bne Main            ;   ,,
 
  ; Custom ISR for music player and day counting
-ISR:        bit PLAY_FL         ; If the game is over, don't do anything
+ISR:        bit GAME_FL         ; If the game is over, don't do anything
             bpl isr_r           ;   in this routine
             jsr FXService       ; Service sound effect
             jsr MusService      ; Service shift register music
@@ -323,10 +327,10 @@ ShowScore:  lda #<ScoreBar      ; Set up score bar
             ldx SCORE           ; Show the score
             lda SCORE+1         ; ,,
             jsr PRTFIX          ; ,,
-            ldx #$03
-            ldy #$0a
-            clc
-            jsr PLOT
+            ldx #$03            ; Place cursor under the time remaining
+            ldy #$0a            ;   column using the KERNAL's PLOT routine
+            clc                 ;   ,,
+            jsr PLOT            ;   ,,
             ldx TIME            ; Get the time remaining
             bpl show_time       ; If negative, show 0 on the clock
             ldx #$00            ; ,,
@@ -345,10 +349,10 @@ ResetCur:   lda #$71            ; Set starting point for level
             rts
 
 ; Move Cursor
-; In the direction specified by X
+; In the direction specified by X (see directional constants)
 MoveCursor: tya                 ; Preserve Y
             pha                 ; ,,
-            lda DirTable,x
+            lda DirTable,x      ; DirTable maps constants to number of cells
             pha
             and #%10000000      ; Extend the sign to 16 bits
             beq sign            ; ,,
@@ -371,7 +375,7 @@ sign:       tay                 ; ,,
 ;   Low nybble = X position
 ; And the character code in X            
 PlaceChar:  pha
-            jsr ResetCur
+            jsr ResetCur        ; Start counting from the top of the play board
             pla
             pha
             and #$0f            ; Mask for X coordinate
@@ -476,11 +480,16 @@ InitRetry:  lda #$00            ; Set the theme
             sta TEMPO           ; ,,
             jsr MPlay           ; Start the music
             sec                 ; Set the game play flag
-            ror PLAY_FL         ; ,,
+            ror GAME_FL         ; ,,
             lda #$0a            ; Set volume and aux color
             sta VOLUME          ; ,,
             rts
-            
+  
+; Initialize Level
+; Prepare things that need to be prepared when a level begins,
+; like starting speed, music control, etc. In Trolley Problem, the
+; game can be continued after a loss, so in some ways, InitLevel
+; needs to behave like a game start, too.           
 InitLevel:  ldy #$21            ; Get the time for the level
             lda (LEVEL),y       ;   and set remaining time
             sta TIME            ;   ,,
@@ -509,6 +518,8 @@ InitLevel:  ldy #$21            ; Get the time for the level
             jsr MPlay           ; Start music
             ; Fall through to DrawLevel
 
+; Draw Level
+; Pull bit patterns from the Levels table and plot them onto the screen
 DrawLevel:  jsr ResetCur        ; Reset cursor to top left
             ldx #$00            ; Initialize ZP cursor index
             ldy #$ff            ; Initialize level data index
@@ -543,7 +554,7 @@ check_end:  cpy #$1f            ; Has all the track been drawn?
 
 ; Generate Track
 ; Scan the screen for the Track Placeholder character and replace it with
-; track, based on 
+; track, based on adjacent track in the cardinal directions
 GenTrack:   jsr ResetCur        ; Reset cursor to top left
 -loop:      ldx #$00
             lda (CURSOR,x)      ; Get character at cursor
@@ -601,7 +612,7 @@ check_end2: lda CURSOR+1        ; Have we reached the end of the screen?
             ; Fall through to AddPieces
 
 ; Add Pieces to Board
-; Switches and Riders
+; Switches and Riders, based on the rules described at the Levels table
 AddPieces:  ldy #$22            ; Start adding pieces after track data
             ldx #SWITCH_OFF     ; First section is switch location data
 -loop:      tya                 ; So we don't need to worry about Y in
@@ -622,12 +633,13 @@ next_piece: pla
             sta C_SWITCH        ;   of the screen
             lda #>SCREEN        ;   ,,
             sta C_SWITCH+1      ;   ,,
-            jsr SilentSw        ; Find next switch, with no sound
+            jsr NextSwitch      ;   ,,
             ; Fall through to CityScape
             
 ; Draw Buildings
-; Use some trig constants as pseudorandom coordinates for
-; buildings
+; Start with the drop-off (goal) depot. Then use BASIC's trig constants as
+; pseudorandom coordinates for buildings, which are strictly there to make the
+; screen look like a city instead of a desolate field.
 CityScape:  ldy #$20            ; Coordinates of depot
             ldx #DEPOT
             lda (LEVEL),y
@@ -647,35 +659,35 @@ CityScape:  ldy #$20            ; Coordinates of depot
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; GAME MECHANICS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-NextSwitch: lda #$04            ; Launch switch sound
-            jsr FXLaunch        ; ,,
-SilentSw:   jsr flip            ; Flip switch zero page pointer to color
+; Find Next Switch
+; Scan the screen FROM the current switch until another switch is found.
+NextSwitch: jsr flip            ; Flip switch zero page pointer to color
             ldx #$00            ; Change the color of the last switch
             lda #$07            ;   back to its original yellow
             sta (C_SWITCH,x)    ;   ,,
             jsr flip            ; Flip switch zero page back to screen
-look_more:  inc C_SWITCH
-            bne is_switch
-            inc C_SWITCH+1
-            lda C_SWITCH+1
-            cmp #$20
-            bne is_switch
-            lda #<SCREEN
-            sta C_SWITCH
-            lda #>SCREEN
-            sta C_SWITCH+1
-is_switch:  ldx #$00
-            lda (C_SWITCH,x)
-            cmp #SWITCH_OFF
-            beq next_sw_r
-            cmp #SWITCH_ON
-            bne look_more
-next_sw_r:  jsr flip
-            lda #$00
-            sta (C_SWITCH,x)
-flip:       lda C_SWITCH+1
-            eor #$88
-            sta C_SWITCH+1
+look_more:  inc C_SWITCH        ; Move to the next cell and see if it's a
+            bne is_switch       ;   switch
+            inc C_SWITCH+1      ; Increment the high byte
+            lda C_SWITCH+1      ; ,,
+            cmp #$20            ; #$20 address $2000 has been reached, meaning
+            bne is_switch       ;   we've reached the end of screen memory. In
+            lda #<SCREEN        ;   this case, go back to the beginning of
+            sta C_SWITCH        ;   screen memory and keep looking for a switch.
+            lda #>SCREEN        ;   ,,
+            sta C_SWITCH+1      ;   ,,
+is_switch:  ldx #$00            ; Check the current character for switchhood.
+            lda (C_SWITCH,x)    ; ,,
+            cmp #SWITCH_OFF     ; If it's not a switch, go back and look at the
+            beq next_sw_r       ;   next cell
+            cmp #SWITCH_ON      ;   ,,
+            bne look_more       ;   ,,
+next_sw_r:  jsr flip            ; Okay, this is cool. Flip switch pointer to
+            lda #$00            ;   color memory with EOR #$88 on the high byte,
+            sta (C_SWITCH,x)    ;   and change the color to black. Then, use
+flip:       lda C_SWITCH+1      ;   EOR #$88 again to flip the high byte back to
+            eor #$88            ;   point to screen memory so that the switch
+            sta C_SWITCH+1      ;   graphic can be updated.
             rts            
        
 ; Game Over            
@@ -693,7 +705,7 @@ Victory:    jsr ShowScore       ; Show final score
             jsr PRTFIX          ; ,,            
             lda #$80            ; Delay for fade-out or victory music
             jsr Delay           ; ,,
-            lsr PLAY_FL         ; Stop the play
+            lsr GAME_FL         ; Stop the play
             bit VICTORY_FL      ; Has the player won the game?
             bpl retry_wait      ;   If not, then fire retries the same level
             jmp Start           ;   If so, fire restarts the game from level 1
@@ -721,8 +733,8 @@ Pickup:     lda RIDING          ; Is there any more room on the trolley?
             sta $9650,y         ; ,,
             lda #$00            ; Launch sound effect for pickup
             jsr FXLaunch        ; ,,
-            lda #$01            ; Flip the low shift register music bit on
-            eor THEME           ;   each pickup so that the music changes
+            lda THEME           ; Flip the low shift register music bit on
+            eor #$01            ;   each pickup so that the music changes
             sta THEME           ;   ,,
 pickup_r:   rts
             
@@ -787,20 +799,19 @@ adj_r:      rts
   
 ; Advance to Next Level
 Advance:    jsr MStop           ; Stop music for bonus count
-            lda #$18
-            jsr Delay
+            lda #$18            ; Short wait before counting bonus
+            jsr Delay           ; ,,
 -loop:      lda #$03            ; Launch bonus sound
             jsr FXLaunch        ; ,,
-            lda #TIME_BONUS
-            jsr AddScore
-            lda #$05
-            jsr Delay
+            lda #TIME_BONUS     ; Add to score for each second remaining
+            jsr AddScore        ; ,,
+            lda #$05            ; Allow player to see countdown
+            jsr Delay           ; ,,
             dec TIME
             bpl loop
-            jsr ShowScore       ; Show score to display 0 time
-            lda #60
-            jsr Delay
-DIAGNOSTIC: inc LEVEL_NUM
+            lda #60             ; One-second wait after bonus count
+            jsr Delay           ; ,,
+DIAGNOSTIC: inc LEVEL_NUM       ; Increment level number
             lda LEVEL_NUM       ; If the player finishes Level 12, the game is
             cmp #$0d            ;   over
             bne lv_data
@@ -815,12 +826,12 @@ DIAGNOSTIC: inc LEVEL_NUM
             sec                 ; Set Victory flag
             ror VICTORY_FL      ; ,,
             jmp Victory         ; End the game
-lv_data:    lda #$30
-            clc
-            adc LEVEL
-            sta LEVEL
-            bcc advance_r
-            inc LEVEL+1
+lv_data:    lda #$30            ; Each level data structure is 48 bytes, so
+            clc                 ;   advance level data pointer to the next
+            adc LEVEL           ;   level.
+            sta LEVEL           ;   ,,
+            bcc advance_r       ;   ,,
+            inc LEVEL+1         ;   ,,
 advance_r:  jmp Level          
                                     
 ; Handle New Cell
@@ -830,15 +841,15 @@ advance_r:  jmp Level
 ;   * Change direction based on tracks and switches
 HandleCell: jsr Adjacent        ; Handle riders, depot, switches  
 srch_track: ldy #$00            ; Search track for table entry
--loop:      lda TrackTurn,y
+-loop:      lda TrackTurn,y     ; ,,
             bmi PrepMove        ; End search if table ends
             cmp UNDER_D         ; This is the newly-entered track character
             beq found
-            iny                 ; Advance to next table entry
-            iny                 ; ,,
-            iny                 ; ,,
-            iny                 ; ,,
-            iny                 ; ,,
+            iny                 ; Advance to next table entry. Each table
+            iny                 ;   entry is five bytes, as described at the
+            iny                 ;   TrackTurn table.
+            iny                 ;   ,,
+            iny                 ;   ,,
             bne loop
 found:      tya                 ; A is the table index
             clc                 ;   for addition
@@ -1041,11 +1052,11 @@ SetBitSrc:  stx ZP_DEST         ; Set the destination pointer
             inc ZP_SOURCE+1
 next_inc:   dey
             bpl loop
-transcribe: ldy #$07
--loop:      lda (ZP_SOURCE),y
-            sta (ZP_DEST),y
-            dey
-            bpl loop
+transcribe: ldy #$07            ; Transcribe 8 bytes from source to destination
+-loop:      lda (ZP_SOURCE),y   ;   for later merging
+            sta (ZP_DEST),y     ;   ,,
+            dey                 ;   ,,
+            bpl loop            ;   ,,
             rts           
                         
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;  
@@ -1111,7 +1122,7 @@ FXLaunch:   sei                 ; Don't play anything while setting up
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;              
 ; Start the music player
 MPlay:      sec
-            ror MUSIC_F
+            ror PLAY_FL
             lda #$00
             sta FADE
             lda TEMPO
@@ -1121,7 +1132,7 @@ MPlay:      sec
 ; Stop the music player
 MStop:      lda #$00
             sta VOICEL
-            sta MUSIC_F
+            sta PLAY_FL
             rts
             
 ; Select Music
@@ -1140,7 +1151,7 @@ SelTheme:   asl                 ; Multiply level by 2 for theme index
 ; Play Next Note
 ; Rotates the 16-bit register one bit to the left
 ; and plays the note
-MusService: bit MUSIC_F
+MusService: bit PLAY_FL
             bpl note_r
             dec MUCD 
             bne note_r
@@ -1173,7 +1184,7 @@ Intro:      .asc $93,$0d,$0d,$0d,$0d,$1f
             .asc     " %    !  PROBLEM    %",$0d
             .asc     " %                  %",$0d
             .asc     " #******************)",$0d
-            .asc $0d,$0d,"  2021@JASON JUSTIAN",$0d,$0d,$0d,$0d,$0d
+            .asc $0d,$0d,"  2021@JASON JUSTIAN",$0d,$0d,$0d,$0d,$0d,$0d
             .asc "      PRESS FIRE",$00
 
 ; Manual Text            
@@ -1254,9 +1265,6 @@ TrackTurn:  .byte $23, 0, 0, 2, 1   ; Curve E / N
             .byte $2d,12, 3,12, 0   ; W switchable
             .byte $2e, 2,11, 0,11   ; S switchable            
             .byte $ff               ; End of table
-
-; Extra bytes for bug fixes, etc.
-pad3583:    .asc "JJ"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LEVEL TABLE
