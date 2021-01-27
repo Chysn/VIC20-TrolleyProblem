@@ -1227,7 +1227,7 @@ FXTable:    .byte $36,$12       ; 0- Rider pickup
             .byte $d6,$76       ; 5- Victory tune
 
 ; Musical Themes
-Themes:     .word $5523
+Themes:     .word $8aca
             
 ; Track Turns
 ; This table describes what turns are made when each kind of track is
@@ -1277,29 +1277,29 @@ Level1:     .byte $80,$00,$ff,$fe,$01,$02,$fd,$7a   ; Tested
             .byte $85,$4a,$bd,$4a,$a1,$4a,$af,$4a
             .byte $a9,$7a,$a9,$02,$af,$f2,$a1,$12
             .byte $bd,$12,$85,$fe,$84,$00,$fc,$00
-            .byte $4d,$2d,$07,$78,$00,$00,$00,$00
+            .byte $4d,$3c,$07,$78,$00,$00,$00,$00
             .byte $00,$00,$00,$00,$e8,$99,$93,$2a
   
-Level2:     .byte $80,$00,$c0,$00,$7f,$ff,$40,$01   ; Tested
-            .byte $5e,$fd,$52,$85,$7a,$85,$4e,$e5
-            .byte $40,$25,$5f,$a5,$50,$a5,$78,$ad
-            .byte $4f,$b9,$40,$09,$7f,$ff,$00,$00
-            .byte $12,$40,$60,$b0,$fc,$00,$00,$00
-            .byte $00,$00,$00,$00,$b6,$8b,$59,$55 
-              
-Level3:     .byte $00,$00,$07,$f8,$04,$08,$1e,$0e   ; Tested
+Level2:     .byte $00,$00,$07,$f8,$04,$08,$1e,$0e   ; Tested
             .byte $12,$0a,$3a,$0a,$aa,$0a,$fa,$0a
-            .byte $22,$0a,$22,$0a,$22,$0a,$3f,$fa
-            .byte $00,$22,$00,$22,$00,$22,$00,$3e
-            .byte $6d,$3c,$63,$c6,$aa,$00,$00,$00
-            .byte $47,$57,$67,$77,$8d,$c3,$c8,$ec
-                                           
-Level4:     .byte $00,$00,$00,$00,$80,$00,$e0,$00   ; Tested
+            .byte $22,$0a,$3f,$fa,$00,$22,$00,$22
+            .byte $00,$3e,$00,$00,$00,$00,$00,$00
+            .byte $6d,$3c,$63,$a6,$8a,$00,$00,$00
+            .byte $47,$57,$67,$77,$7d,$a3,$a8,$bc 
+                                                       
+Level3:     .byte $00,$00,$00,$00,$80,$00,$e0,$00   ; Tested
             .byte $20,$00,$ff,$ff,$a0,$21,$e0,$21
             .byte $80,$21,$ff,$ff,$20,$01,$20,$01
             .byte $20,$01,$3f,$ff,$00,$00,$00,$00
             .byte $61,$3c,$4a,$82,$aa,$00,$00,$00
             .byte $00,$00,$ec,$e8,$e4,$4c,$48,$44  
+ 
+Level4:     .byte $00,$00,$80,$00,$df,$fe,$50,$22   ; Tested
+            .byte $fe,$22,$c3,$fe,$7a,$22,$4e,$22
+            .byte $44,$22,$44,$3e,$44,$02,$7f,$fe
+            .byte $25,$08,$27,$0f,$20,$01,$3f,$ff
+            .byte $c8,$3c,$55,$60,$a7,$9f,$00,$00
+            .byte $cd,$a4,$a2,$8b,$82,$65,$48,$3d   
              
 Level5:     .byte $80,$00,$ff,$f0,$10,$10,$30,$18   ; Tested
             .byte $67,$ec,$4d,$36,$4b,$d2,$4a,$5e
@@ -1340,8 +1340,8 @@ Level10:    .byte $7f,$ff,$40,$81,$5d,$dd,$77,$75   ; Tested
             .byte $1d,$dd,$08,$01,$1d,$dd,$95,$57
             .byte $fd,$dc,$08,$88,$08,$88,$1d,$dc
             .byte $77,$54,$5d,$dc,$40,$08,$7f,$f8
-            .byte $e0,$40,$34,$38,$3c,$74,$78,$7c
-            .byte $c4,$c8,$cc,$00,$4a,$46,$99,$9d
+            .byte $e0,$40,$34,$38,$74,$78,$7c,$c4
+            .byte $c8,$cc,$00,$4a,$46,$99,$9d,$a7
                         
 Level11:    .byte $00,$00,$07,$00,$0d,$80,$18,$c0   ; Tested
             .byte $37,$60,$25,$2e,$27,$eb,$21,$29
