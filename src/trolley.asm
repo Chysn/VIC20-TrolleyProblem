@@ -28,7 +28,7 @@ BASIC:      .byte $0b,$10,$2a,$00,$9e,$34,$31,$31
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Constants - Game Configuration
 SCRCOLVAL   = 238               ; Screen color
-NORTH       = $01               ; ,,
+NORTH       = $01               ; Directional contstants
 EAST        = $02               ; ,,
 SOUTH       = $03               ; ,,
 WEST        = $04               ; ,,
@@ -62,7 +62,7 @@ B_DEST      = $3f               ; Bipmap destination character
 ; System Resources
 CINV        = $0314             ; ISR vector
 NMINV       = $0318             ; Release NMI vector
-;NMINV       = $fffe             ; Development NMI non-vector
+;-NMINV     = $fffe             ; Development NMI non-vector (uncomment for dev)
 SCREEN      = $1e00             ; Screen character memory (unexpanded)
 COLOR       = $9600             ; Screen color memory (unexpanded)
 IRQ         = $eabf             ; System ISR   
