@@ -65,7 +65,7 @@ NMINV       = $0318             ; Release NMI vector
 ;-NMINV     = $fffe             ; Development NMI non-vector (uncomment for dev)
 SCREEN      = $1e00             ; Screen character memory (unexpanded)
 COLOR       = $9600             ; Screen color memory (unexpanded)
-IRQ         = $eb12             ; System ISR return point
+IRQ         = $eabf             ; System ISR return point
 VICCR5      = $9005             ; Character map register
 VOICEH      = $900c             ; High sound register
 VOICEM      = $900b             ; Mid sound register
@@ -262,8 +262,7 @@ c_speed:    dec SPEED_COUNT     ; Handle speed countdown for trolley
             sta SPEED_COUNT     ; ,,
             sec                 ; Set the movement flag
             ror MOVE_FL         ; ,,
-isr_r:      inc TIME_L          ; Advance timer for delay
-            jmp IRQ           
+isr_r:      jmp IRQ           
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; SUBROUTINES
@@ -1197,8 +1196,8 @@ Intro:      .asc $93,$0d,$0d,$0d,$0d,$1f
             .asc     " %                  %",$0d
             .asc     " %    !  PROBLEM    %",$0d
             .asc     " %                  %",$0d
-            .asc     " #******************)",$0d
-            .asc $0d,$0d,"  2021@JASON JUSTIAN",$0d,$0d,$0d,$0d,$0d,$0d
+            .asc     " #******************)",$0d,$0d,$0d
+            .asc     "  2021@JASON JUSTIAN",$0d,$0d,$0d,$0d,$0d,$0d
             .asc "      PRESS FIRE",$00
 
 ; Manual Text            
@@ -1229,7 +1228,7 @@ GameOverTx: .asc $13,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11
             .asc "#************)",$00    
 VictoryTx   .asc $13,$11,$9e,"       VICTORY",$1c,"Z     ",$00                   
 HiScoreTx:  .asc $13,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11,$11
-            .asc $11,$11,$11,$11,$11,$11,$11,$11,$11,"    HIGH SCORE ",$00
+            .asc $11,$11,$11,$11,$11,$11,$11,$11,$11,"   HIGH SCORE  ",$00
             
 ; Direction Tables                       
 DirTable:   .byte $01,$ea,$01,$16,$ff
@@ -1280,8 +1279,8 @@ TrackTurn:  .byte $23, 0, 0, 2, 1   ; Curve E / N
             .byte $2e, 2,11, 0,11   ; S switchable            
             .byte $ff               ; End of table
 
-; Padding to 3583 bytes, for bug fixes, etc.
-Pad3583:    .asc "JEJ"
+; Pad to 3583 bytes for bug fixes, etc.
+Pad3583     .asc "JEJ21"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LEVEL TABLE
