@@ -65,7 +65,7 @@ NMINV       = $0318             ; Release NMI vector
 ;-NMINV     = $fffe             ; Development NMI non-vector (uncomment for dev)
 SCREEN      = $1e00             ; Screen character memory (unexpanded)
 COLOR       = $9600             ; Screen color memory (unexpanded)
-IRQ         = $eabf             ; System ISR   
+IRQ         = $eb12             ; System ISR return point
 VICCR5      = $9005             ; Character map register
 VOICEH      = $900c             ; High sound register
 VOICEM      = $900b             ; Mid sound register
@@ -163,17 +163,24 @@ Welcome:    lda #SCRCOLVAL      ; Set background color
             lda #<Manual        ; Show the game manual
             ldy #>Manual        ; ,,
             jsr PRTSTR          ; ,,
+            ; Fall through to Start
 
 ; Start a new game            
 Start:      jsr Wait4Fire
             jsr InitGame        ; Initialize game and draw first level
+            ; Fall through to Level
             
+; Start the next level            
 Level:      sei
             jsr InitLevel       ; Initialize Level
             cli
             jsr PrepMove
+            ; Fall through to Main
 
-; Main loop            
+; Main loop  
+;   - Check and handle joystick movement   
+;   - Move bitmap if the movement flag is set
+;   - Show the score and timer display if the timer flag is set    
 Main:       bit MOVE_FL         ; If move flag is set, move the trolley
             bpl timer_disp      ;   one pixel in the appropriate direction
             jsr MoveBitmap      ;   ,,
@@ -229,7 +236,15 @@ slower:     lda SPEED           ; Slow down the trolley, if possible. See
             inc SPEED           ;   ,,
             bne Main            ;   ,,
 
- ; Custom ISR for music player and day counting
+ ; Interrupt Service Routine
+ ; If the game flag is set, perform the following actions
+ ;   - Service sound effect progress
+ ;   - Service music progress
+ ;   - Decrement the second counter, and every second
+ ;       - Decrement the level timer
+ ;       - Set the "show timer" flag
+ ;   - Decrement the speed counter, and at 0 set the trolley move flag
+ ;   - Go to hardware IRQ
 ISR:        bit GAME_FL         ; If the game is over, don't do anything
             bpl isr_r           ;   in this routine
             jsr FXService       ; Service sound effect
@@ -247,7 +262,8 @@ c_speed:    dec SPEED_COUNT     ; Handle speed countdown for trolley
             sta SPEED_COUNT     ; ,,
             sec                 ; Set the movement flag
             ror MOVE_FL         ; ,,
-isr_r:      jmp IRQ           
+isr_r:      inc TIME_L          ; Advance timer for delay
+            jmp IRQ           
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; SUBROUTINES
@@ -337,8 +353,7 @@ ShowScore:  lda #<ScoreBar      ; Set up score bar
 show_time:  lda #$00            ; Show the time remaining
             jsr PRTFIX          ; ,,
             lda #$20            ; Space to clear unused tens
-            jsr CHROUT          ;   places
-            rts
+            jmp CHROUT          ;   places
             
 ; Reset Cursor
 ; To the top of the board
@@ -629,11 +644,6 @@ next_piece: pla
             iny
             cpy #$30            ; Reached end of level data
             bcc loop
-            lda #<SCREEN        ; Locate the first switch from the top
-            sta C_SWITCH        ;   of the screen
-            lda #>SCREEN        ;   ,,
-            sta C_SWITCH+1      ;   ,,
-            jsr NextSwitch      ;   ,,
             ; Fall through to CityScape
             
 ; Draw Buildings
@@ -654,7 +664,11 @@ CityScape:  ldy #$20            ; Coordinates of depot
             dey
             bne loop
             jsr ShowScore       ; Show score at end of level draw
-            rts
+            lda #<SCREEN        ; Locate the first switch from the top
+            sta C_SWITCH        ;   of the screen
+            lda #>SCREEN        ;   ,,
+            sta C_SWITCH+1      ;   ,,
+            ; Fall through to NextSwitch
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; GAME MECHANICS
@@ -1265,6 +1279,9 @@ TrackTurn:  .byte $23, 0, 0, 2, 1   ; Curve E / N
             .byte $2d,12, 3,12, 0   ; W switchable
             .byte $2e, 2,11, 0,11   ; S switchable            
             .byte $ff               ; End of table
+
+; Padding to 3583 bytes, for bug fixes, etc.
+Pad3583:    .asc "JEJ"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LEVEL TABLE
