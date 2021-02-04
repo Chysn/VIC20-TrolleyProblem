@@ -65,7 +65,7 @@ NMINV       = $0318             ; Release NMI vector
 ;-NMINV     = $fffe             ; Development NMI non-vector (uncomment for dev)
 SCREEN      = $1e00             ; Screen character memory (unexpanded)
 COLOR       = $9600             ; Screen color memory (unexpanded)
-IRQ         = $eabf             ; System ISR return point
+IRQ         = $eb12             ; System ISR return point
 VICCR5      = $9005             ; Character map register
 VOICEH      = $900c             ; High sound register
 VOICEM      = $900b             ; Mid sound register
@@ -262,7 +262,9 @@ c_speed:    dec SPEED_COUNT     ; Handle speed countdown for trolley
             sta SPEED_COUNT     ; ,,
             sec                 ; Set the movement flag
             ror MOVE_FL         ; ,,
-isr_r:      jmp IRQ           
+isr_r:      jsr $f755           ; Read keyboard
+            inc TIME_L          ; Increment timer for delays
+            jmp IRQ           
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; SUBROUTINES
@@ -1278,9 +1280,6 @@ TrackTurn:  .byte $23, 0, 0, 2, 1   ; Curve E / N
             .byte $2d,12, 3,12, 0   ; W switchable
             .byte $2e, 2,11, 0,11   ; S switchable            
             .byte $ff               ; End of table
-
-; Pad to 3583 bytes for bug fixes, etc.
-Pad3583     .asc "JEJ21"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LEVEL TABLE
